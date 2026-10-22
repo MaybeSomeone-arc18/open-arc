@@ -725,6 +725,28 @@ class OpenArcApp {
     if (popTab) this.closeTab(popTab.id)
     this.switchTab(exampleTab.id)
 
+    // Ctrl+P saves the active tab as a real PDF into ~/Downloads
+    this.switchTab(exampleTab.id)
+    const dlDir = join(app.getPath('home'), 'Downloads')
+    fs.mkdirSync(dlDir, { recursive: true })
+    const pdfsBefore = new Set(fs.readdirSync(dlDir).filter((f) => f.endsWith('.pdf')))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true}))"
+    )
+    let pdfFile = ''
+    for (let i = 0; i < 20 && !pdfFile; i++) {
+      await wait(250)
+      const now = fs.readdirSync(dlDir).filter((f) => f.endsWith('.pdf') && !pdfsBefore.has(f))
+      if (now.length > 0) pdfFile = now[0]
+    }
+    const pdfPath = join(dlDir, pdfFile)
+    const pdfOk =
+      pdfFile.length > 0 &&
+      fs.statSync(pdfPath).size > 1000 &&
+      fs.readFileSync(pdfPath).subarray(0, 5).toString() === '%PDF-'
+    check('pdf: Ctrl+P saves a real PDF to Downloads', pdfOk, `file=${pdfFile || 'none'} size=${pdfFile ? fs.statSync(pdfPath).size : 0}`)
+    if (pdfFile) fs.rmSync(pdfPath)
+
     // Reader mode (Ctrl+Alt+R) on the Wikipedia article: overlay appears with
     // the article title, toggles off again. Asserted on the page DOM itself.
     this.switchTab(wikiTab.id)
@@ -1021,6 +1043,23 @@ class OpenArcApp {
     ipcMain.handle('tab:mute-toggle', () => {
       const active = this.activeTab()
       return active ? this.tabs.toggleMute(active.id) : false
+    })
+    ipcMain.handle('tab:print-pdf', async () => {
+      const active = this.activeTab()
+      const wc = active ? this.tabs.webContentsFor(active.id) : null
+      if (!wc) return null
+      try {
+        const data = await wc.printToPDF({ printBackground: true })
+        if (!data || data.length < 100) return null
+        const host = new URL(wc.getURL()).hostname.replace(/[^a-z0-9.-]/gi, '_') || 'page'
+        const dir = join(app.getPath('home'), 'Downloads')
+        fs.mkdirSync(dir, { recursive: true })
+        const path = join(dir, `open-arc-${host}-${Date.now()}.pdf`)
+        fs.writeFileSync(path, data)
+        return path
+      } catch {
+        return null
+      }
     })
     ipcMain.handle('tab:reader', async () => {
       const active = this.activeTab()

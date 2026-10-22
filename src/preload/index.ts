@@ -38,6 +38,7 @@ const api: OpenArcApi = {
   toggleMute: () => ipcRenderer.invoke('tab:mute-toggle'),
   toggleDevTools: () => ipcRenderer.invoke('tab:devtools'),
   toggleReader: () => ipcRenderer.invoke('tab:reader'),
+  printToPdf: () => ipcRenderer.invoke('tab:print-pdf'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
 

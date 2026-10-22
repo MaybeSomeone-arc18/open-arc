@@ -92,6 +92,7 @@ export interface OpenArcApi {
   toggleMute(): Promise<boolean>
   toggleDevTools(): Promise<boolean>
   toggleReader(): Promise<string>
+  printToPdf(): Promise<string | null>
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'close'): void
 

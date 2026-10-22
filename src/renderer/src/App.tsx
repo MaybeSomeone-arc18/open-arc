@@ -96,6 +96,13 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('view-source')
       }
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        window.openArc.printToPdf().then((path) => {
+          setZoomToast(path ? `Saved PDF: ${path.split('/').pop()}` : 'PDF export failed')
+          setTimeout(() => setZoomToast(null), 2500)
+        })
+      }
       if (mod && e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault()
         window.openArc.toggleReader().then((res) => {
