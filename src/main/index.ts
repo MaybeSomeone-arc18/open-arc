@@ -529,6 +529,18 @@ class OpenArcApp {
     check('auto-archive: idle tab moves to archive', moved >= 1 && this.activeSpace().archived.some((t) => t.id === wiki2!.id))
     await shot('5-auto-archive')
 
+    // Restore from archive: archive a throwaway tab, bring it back
+    this.openTab('https://example.org/')
+    const tempTab = this.activeTab()!
+    await pollUntil(() => (this.tabs.currentUrl(tempTab.id) ?? '').includes('example.org'), 10000)
+    this.switchTab(exampleTab.id)
+    tempTab.lastActiveAt = Date.now() - this.state.archiveAfterMs - 1000
+    this.archiveIdle(false)
+    const wasArchived = this.activeSpace().archived.some((t) => t.id === tempTab.id)
+    this.restoreTab(tempTab.id)
+    check('restore archived tab', wasArchived && this.activeSpace().today.some((t) => t.id === tempTab.id))
+    this.closeTab(tempTab.id) // keep the final state tidy for the verify phase
+
     // Window bounds persistence: set a distinctive size; the verify phase
     // asserts both the saved state and the restored live window.
     this.win.setSize(1000, 700)

@@ -7,7 +7,7 @@ interface Props {
 }
 
 interface Row {
-  kind: 'open-url' | 'command' | 'tab'
+  kind: 'open-url' | 'command' | 'tab' | 'archived'
   id: string
   title: string
   hint?: string
@@ -32,6 +32,14 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
     [state]
   )
 
+  const archivedTabs = useMemo(
+    () =>
+      state.spaces.flatMap((s) =>
+        s.archived.map((t) => ({ ...t, spaceName: s.name, spaceId: s.id }))
+      ),
+    [state]
+  )
+
   const rows = useMemo((): Row[] => {
     const q = query.trim().toLowerCase()
     const out: Row[] = []
@@ -48,6 +56,11 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
         out.push({ kind: 'tab', id: t.id, title: t.title || t.url, hint: t.spaceName })
       }
     }
+    for (const t of archivedTabs) {
+      if (q && (t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))) {
+        out.push({ kind: 'archived', id: t.id, title: t.title || t.url, hint: `${t.spaceName} · archived` })
+      }
+    }
     return out.slice(0, 12)
   }, [query, commands, allTabs])
 
@@ -57,6 +70,7 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
     if (row.kind === 'open-url') window.openArc.openTab(query.trim())
     if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' ? query.trim() : undefined)
     if (row.kind === 'tab') window.openArc.switchTab(row.id)
+    if (row.kind === 'archived') window.openArc.restoreTab(row.id)
     onClose()
   }
 
