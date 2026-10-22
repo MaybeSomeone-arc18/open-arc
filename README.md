@@ -18,13 +18,13 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Persistence**: spaces, pins, tabs, archive and window state survive restarts (atomic JSON writes)
 - Frameless window with working minimize / maximize / close and a drag region
 - **Downloads**: files save to the system Downloads folder with a completion toast
-- **Find-in-page** (Ctrl+F) with live match count and Enter / Shift+Enter navigation
+- **Find-in-page** (Ctrl+F) with live match count and Enter / Shift+Enter navigation *(implemented; not yet verified on real hardware - see Known limitations)*
 - **Per-tab zoom**: Ctrl+= / Ctrl+- / Ctrl+0 (50%-300%), with a zoom-level toast
 - **Copy active URL**: Ctrl+Shift+C writes the tab's live URL to the clipboard
 - **Mute tab**: Ctrl+M toggles the active tab's audio
 - **Reader mode**: Ctrl+Alt+R extracts the article into a clean reading view (works best on article pages)
 - **Save as PDF**: Ctrl+P writes the active tab to a PDF in the Downloads folder
-- **Page context menu**: right-click links/images for open-in-new-tab, copy link/image, back/forward/reload, view source, inspect
+- **Page context menu**: right-click links/images for open-in-new-tab, copy link/image, back/forward/reload, view source, inspect *(item behaviors verified; the native popup is not - see Known limitations)*
 - Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Shift+R hard reload, Ctrl+U view source, Ctrl+Alt+R reader mode, Ctrl+P save as PDF, F12 / Ctrl+Shift+I DevTools, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar
 
 Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no dedicated history page (history is searchable from the command bar), single window only. This is a PoC of the product experience, not a daily driver yet.
@@ -101,7 +101,9 @@ Node 22+ required. Linux/macOS/Windows.
 
 - `esbuild` / `vite` / `electron-vite`: dev-server request forgery (GHSA-67mh-4wv8-2f99) and a vite path-traversal issue in optimized-deps sourcemap handling - these only affect `npm run dev` on an untrusted network. They are build tooling; none of this code ships in the app.
 
-Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR integrity bypass, GHSA-vmqv-hx8q-j7mg) to **44.9.3**, a currently supported release. The upgrade is verified: `npm run typecheck`, `npm run build` and the full `npm run shot` smoke suite (13/13) pass on 44.9.3, and the suite's live-page captures render real content.
+Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR integrity bypass, GHSA-vmqv-hx8q-j7mg) to **44.9.3**, a currently supported release. The upgrade is verified: `npm run typecheck`, `npm run build` and the full `npm run shot` smoke suite pass on 44.9.3 (the suite has since grown to 50 checks), and the suite's live-page captures render real content.
+
+Browser-shell hardening: every web permission request (camera, mic, notifications, geolocation, ...) is default-denied until a consent UI exists - Electron grants them by default otherwise. Popups (`window.open`, `target=_blank`) are denied as OS windows and reopened as tabs inside the shell. Both behaviors are smoke-checked.
 
 Runtime dependencies shipped to the app (`react`, `react-dom`) have no known advisories at audit time. Re-run `npm audit` before any packaged release; no packaged build should be distributed until the remaining dev-tooling advisories are re-checked at that time.
 

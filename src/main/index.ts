@@ -617,6 +617,8 @@ class OpenArcApp {
     this.openTab('https://en.wikipedia.org/wiki/Web_browser')
     const wikiTab = this.activeTab()!
     await pollUntil(() => wikiTab.title.includes('Wikipedia'), 15000)
+    const faviconOk = await pollUntil(() => !!wikiTab.favicon, 8000)
+    check('favicon: live page reports a favicon to the sidebar', faviconOk, `favicon=${(wikiTab.favicon ?? 'none').slice(0, 50)}`)
     this.switchTab(exampleTab.id)
     const withinOk = this.activeSpace().activeTabId === exampleTab.id
     this.switchTab(wikiTab.id)
@@ -660,6 +662,18 @@ class OpenArcApp {
     const mutedOff = await pollUntil(() => !this.tabs.isMuted(exampleTab.id), 5000)
     check('shortcuts: Ctrl+M again unmutes', mutedOff)
     this.switchTab(wikiTab.id)
+
+    // Ctrl+W closes the active tab (real keydown path)
+    this.openTab('https://example.org/')
+    const closeMe = this.activeTab()!
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'w',ctrlKey:true,bubbles:true}))"
+    )
+    const closedByKey = await pollUntil(
+      () => ![...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => t.id === closeMe.id),
+      5000
+    )
+    check('shortcuts: Ctrl+W closes active tab', closedByKey)
 
     // Ctrl+Shift+K duplicates the active tab (same URL, becomes active)
     const beforeIds = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
@@ -961,6 +975,15 @@ class OpenArcApp {
     this.runCommand('delete-space')
     this.switchTab(exampleTab.id)
 
+    // Space rename through the real preload IPC path (and back - later
+    // checks look up the space by its original name)
+    const smokeSpace = this.state.spaces.find((sp) => sp.name === 'Smoke')!
+    await this.win.webContents.executeJavaScript(`window.openArc.renameSpace(${JSON.stringify(smokeSpace.id)}, 'Work')`)
+    const renamed = await pollUntil(() => this.state.spaces.some((sp) => sp.name === 'Work' && sp.icon === 'W'), 5000)
+    check('spaces: rename via IPC updates name and icon', renamed)
+    await this.win.webContents.executeJavaScript(`window.openArc.renameSpace(${JSON.stringify(smokeSpace.id)}, 'Smoke')`)
+    await pollUntil(() => this.state.spaces.some((sp) => sp.name === 'Smoke'), 5000)
+
     // Move tab to space (command path with a space-name argument): wikiTab
     // goes Personal -> Smoke and back; both sides of each move asserted.
     this.switchTab(wikiTab.id)
@@ -980,9 +1003,13 @@ class OpenArcApp {
     )
     this.switchTab(exampleTab.id)
 
-    // Pin
+    // Pin, unpin, re-pin (verify phase expects the example tab pinned)
     this.setPinned(exampleTab.id, true)
     check('pin tab', this.activeSpace().pinned.some((t) => t.id === exampleTab.id))
+    this.setPinned(exampleTab.id, false)
+    const unpinned = !this.activeSpace().pinned.some((t) => t.id === exampleTab.id) && this.activeSpace().today.some((t) => t.id === exampleTab.id)
+    this.setPinned(exampleTab.id, true)
+    check('unpin then re-pin round trip', unpinned && this.activeSpace().pinned.some((t) => t.id === exampleTab.id))
 
     // Reopen closed tab (Ctrl+Shift+T path): close the wiki tab, reopen by URL
     const wikiUrl = wikiTab.url
