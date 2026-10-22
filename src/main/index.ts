@@ -454,6 +454,17 @@ class OpenArcApp {
         this.commit()
         break
       }
+      case 'close-right': {
+        if (!active || active.pinned) break
+        const idx = space.today.findIndex((t) => t.id === active.id)
+        if (idx === -1) break
+        const toClose = space.today.slice(idx + 1)
+        for (const t of toClose) this.tabs.close(t.id)
+        space.today = space.today.slice(0, idx + 1)
+        if (space.splitTabId && toClose.some((t) => t.id === space.splitTabId)) space.splitTabId = null
+        this.commit()
+        break
+      }
       case 'clear-today':
         for (const t of [...space.today]) this.tabs.close(t.id)
         space.today = []
@@ -971,6 +982,26 @@ class OpenArcApp {
       'command: close-others keeps only active tab',
       scratch.today.length === 1 && scratch.today[0].id === keepTab.id && scratch.activeTabId === keepTab.id,
       `today=${scratch.today.length}`
+    )
+    this.runCommand('delete-space')
+    this.switchTab(exampleTab.id)
+
+    // Close Tabs to the Right: throwaway space, 3 tabs, active first
+    this.createSpace('Scratch2')
+    this.openTab('https://example.com/')
+    const firstTab = this.activeTab()!
+    this.openTab('https://example.org/')
+    const midTab = this.activeTab()!
+    this.openTab('https://example.com/?b=2')
+    const lastTab = this.activeTab()!
+    this.switchTab(firstTab.id)
+    this.runCommand('close-right')
+    const scratch2 = this.activeSpace()
+    check(
+      'command: close-right closes tabs after active',
+      scratch2.today.length === 1 && scratch2.today[0].id === firstTab.id &&
+        this.tabs.currentUrl(midTab.id) === null && this.tabs.currentUrl(lastTab.id) === null,
+      `today=${scratch2.today.length}`
     )
     this.runCommand('delete-space')
     this.switchTab(exampleTab.id)
