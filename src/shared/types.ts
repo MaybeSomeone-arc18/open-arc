@@ -91,6 +91,7 @@ export interface OpenArcApi {
   copyActiveUrl(): Promise<string | null>
   toggleMute(): Promise<boolean>
   toggleDevTools(): Promise<boolean>
+  toggleReader(): Promise<string>
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'close'): void
 

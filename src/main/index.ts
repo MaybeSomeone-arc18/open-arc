@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, session, clipboard } from 'electron'
+import { readerToggle } from './reader'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -724,6 +725,34 @@ class OpenArcApp {
     if (popTab) this.closeTab(popTab.id)
     this.switchTab(exampleTab.id)
 
+    // Reader mode (Ctrl+Alt+R) on the Wikipedia article: overlay appears with
+    // the article title, toggles off again. Asserted on the page DOM itself.
+    this.switchTab(wikiTab.id)
+    await pollUntil(() => (this.tabs.currentUrl(wikiTab.id) ?? '').includes('wikipedia.org'), 5000)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,altKey:true,bubbles:true}))"
+    )
+    const wikiWc = this.tabs.webContentsFor(wikiTab.id)!
+    let readerOn = false
+    for (let i = 0; i < 20 && !readerOn; i++) {
+      readerOn = await wikiWc.executeJavaScript("!!document.getElementById('oa-reader-overlay')")
+      if (!readerOn) await wait(250)
+    }
+    const readerTitle: string = readerOn
+      ? await wikiWc.executeJavaScript("document.querySelector('.oa-reader h1')?.textContent ?? ''")
+      : ''
+    check('reader mode: overlay with article title', readerOn === true && /Web browser/.test(readerTitle), `title="${readerTitle.slice(0, 40)}"`)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,altKey:true,bubbles:true}))"
+    )
+    let readerOff = false
+    for (let i = 0; i < 20 && !readerOff; i++) {
+      readerOff = await wikiWc.executeJavaScript("!document.getElementById('oa-reader-overlay')")
+      if (!readerOff) await wait(250)
+    }
+    check('reader mode: toggles off', readerOff)
+    this.switchTab(exampleTab.id)
+
     // Ctrl+U opens view-source of the active tab in a new tab
     const beforeSrc = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
     await this.win.webContents.executeJavaScript(
@@ -992,6 +1021,16 @@ class OpenArcApp {
     ipcMain.handle('tab:mute-toggle', () => {
       const active = this.activeTab()
       return active ? this.tabs.toggleMute(active.id) : false
+    })
+    ipcMain.handle('tab:reader', async () => {
+      const active = this.activeTab()
+      const wc = active ? this.tabs.webContentsFor(active.id) : null
+      if (!wc) return 'no-content'
+      try {
+        return (await wc.executeJavaScript(`(${readerToggle.toString()})()`)) as string
+      } catch {
+        return 'no-content'
+      }
     })
     ipcMain.handle('tab:devtools', () => {
       const active = this.activeTab()

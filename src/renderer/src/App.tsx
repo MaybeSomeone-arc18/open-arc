@@ -60,7 +60,7 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('hard-reload')
       }
-      if (mod && !e.shiftKey && e.key.toLowerCase() === 'r') {
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'r') {
         // Reload the active TAB, never the shell (default menu is removed).
         e.preventDefault()
         window.openArc.runCommand('reload')
@@ -95,6 +95,13 @@ export function App(): JSX.Element {
       if (mod && !e.shiftKey && e.key.toLowerCase() === 'u') {
         e.preventDefault()
         window.openArc.runCommand('view-source')
+      }
+      if (mod && e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        window.openArc.toggleReader().then((res) => {
+          setZoomToast(res === 'on' ? 'Reader mode on' : res === 'off' ? 'Reader mode off' : 'No readable article found')
+          setTimeout(() => setZoomToast(null), 1500)
+        })
       }
       if (e.key === 'F12' || (mod && e.shiftKey && e.key.toLowerCase() === 'i')) {
         e.preventDefault()
