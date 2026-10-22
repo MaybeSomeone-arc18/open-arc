@@ -3,11 +3,13 @@ import type { AppState } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
 import { CommandBar } from './components/CommandBar'
 import { FindBar } from './components/FindBar'
+import { ShortcutsOverlay } from './components/ShortcutsOverlay'
 
 export function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null)
   const [commandBarOpen, setCommandBarOpen] = useState(false)
   const [findBarOpen, setFindBarOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set())
   const [downloadToast, setDownloadToast] = useState<string | null>(null)
   const [zoomToast, setZoomToast] = useState<string | null>(null)
@@ -154,7 +156,11 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('close-split')
       }
-      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false) }
+      if (mod && e.key === '/') {
+        e.preventDefault()
+        setShortcutsOpen((v) => !v)
+      }
+      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false); setShortcutsOpen(false) }
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -176,6 +182,7 @@ export function App(): JSX.Element {
       {state.sidebarVisible && <Sidebar state={state} space={space} loadingTabs={loadingTabs} onOpenCommandBar={() => setCommandBarOpen(true)} />}
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
       {findBarOpen && <FindBar onClose={() => setFindBarOpen(false)} />}
+      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       {downloadToast && <div className="download-toast">{downloadToast}</div>}
       {zoomToast && <div className="download-toast">{zoomToast}</div>}
       {!state.sidebarVisible && (

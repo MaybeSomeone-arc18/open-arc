@@ -124,6 +124,15 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 .command-row.empty { justify-content: center; font-style: italic; }
 .command-hint { font-size: 11px; color: var(--text-dim); }
 
+/* ---- Shortcuts overlay ---- */
+.shortcuts-panel { width: 480px; }
+.shortcuts-title {
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+  padding: 14px 18px 10px; border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.shortcuts-row { cursor: default; }
+.shortcuts-row:hover { background: color-mix(in srgb, var(--space-color) 18%, transparent); color: var(--text); }
+
 .empty-hint.clickable { cursor: pointer; }
 .empty-hint.clickable:hover { color: var(--text); }
 

@@ -25,7 +25,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Reader mode**: Ctrl+Alt+R extracts the article into a clean reading view (works best on article pages)
 - **Save as PDF**: Ctrl+P writes the active tab to a PDF in the Downloads folder
 - **Page context menu**: right-click links/images for open-in-new-tab, copy link/image, back/forward/reload, view source, inspect *(item behaviors verified; the native popup is not - see Known limitations)*
-- Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Shift+R hard reload, Ctrl+U view source, Ctrl+Alt+R reader mode, Ctrl+P save as PDF, F12 / Ctrl+Shift+I DevTools, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar
+- Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Shift+R hard reload, Ctrl+U view source, Ctrl+Alt+R reader mode, Ctrl+P save as PDF, F12 / Ctrl+Shift+I DevTools, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar, Ctrl+/ shortcut reference
 
 Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no dedicated history page (history is searchable from the command bar), single window only. This is a PoC of the product experience, not a daily driver yet.
 

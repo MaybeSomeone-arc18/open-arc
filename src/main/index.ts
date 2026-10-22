@@ -507,10 +507,10 @@ class OpenArcApp {
       checks.push({ name, pass, detail })
       console.log(`[openarc] ${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ' - ' + detail : ''}`)
     }
-    const pollUntil = async (fn: () => boolean, ms: number): Promise<boolean> => {
+    const pollUntil = async (fn: () => boolean | Promise<boolean>, ms: number): Promise<boolean> => {
       const end = Date.now() + ms
       while (Date.now() < end) {
-        if (fn()) return true
+        if (await fn()) return true
         await wait(250)
       }
       return fn()
@@ -673,6 +673,24 @@ class OpenArcApp {
     const mutedOff = await pollUntil(() => !this.tabs.isMuted(exampleTab.id), 5000)
     check('shortcuts: Ctrl+M again unmutes', mutedOff)
     this.switchTab(wikiTab.id)
+
+    // Ctrl+/ opens the shortcuts overlay; Escape closes it
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'/',ctrlKey:true,bubbles:true}))"
+    )
+    const overlayShown = await pollUntil(
+      () => this.win.webContents.executeJavaScript("!!document.querySelector('.shortcuts-overlay')"),
+      5000
+    )
+    check('shortcuts: Ctrl+/ opens shortcuts overlay', overlayShown)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    const overlayGone = await pollUntil(
+      async () => !(await this.win.webContents.executeJavaScript("!!document.querySelector('.shortcuts-overlay')")),
+      5000
+    )
+    check('shortcuts: Escape closes shortcuts overlay', overlayGone)
 
     // Ctrl+W closes the active tab (real keydown path)
     this.openTab('https://example.org/')
