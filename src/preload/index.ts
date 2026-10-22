@@ -35,6 +35,7 @@ const api: OpenArcApi = {
   stopFind: () => ipcRenderer.send('find:stop'),
   zoom: (action) => ipcRenderer.invoke('tab:zoom', action),
   copyActiveUrl: () => ipcRenderer.invoke('tab:copy-url'),
+  toggleMute: () => ipcRenderer.invoke('tab:mute-toggle'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
 

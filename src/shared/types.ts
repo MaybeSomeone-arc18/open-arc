@@ -79,6 +79,7 @@ export interface OpenArcApi {
   stopFind(): void
   zoom(action: 'in' | 'out' | 'reset'): Promise<number>
   copyActiveUrl(): Promise<string | null>
+  toggleMute(): Promise<boolean>
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'close'): void
 

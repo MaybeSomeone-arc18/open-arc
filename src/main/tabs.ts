@@ -153,6 +153,18 @@ export class TabLayer {
     return this.views.get(tabId)?.webContents.getZoomFactor() ?? 1
   }
 
+  toggleMute(tabId: string): boolean {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return false
+    const next = !wc.isAudioMuted()
+    wc.setAudioMuted(next)
+    return next
+  }
+
+  isMuted(tabId: string): boolean {
+    return this.views.get(tabId)?.webContents.isAudioMuted() ?? false
+  }
+
   navigate(tabId: string, command: 'back' | 'forward' | 'reload'): void {
     const wc = this.views.get(tabId)?.webContents
     if (!wc) return

@@ -554,6 +554,20 @@ class OpenArcApp {
     check('shortcuts: Ctrl+Shift+C copies active tab URL', clip === wantUrl && wantUrl.length > 0, `clipboard="${clip.slice(0, 60)}"`)
     this.switchTab(wikiTab.id) // restore the precondition the Ctrl+Tab check expects
 
+    // Ctrl+M mutes/unmutes the active tab (state asserted on the webContents)
+    this.switchTab(exampleTab.id)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,bubbles:true}))"
+    )
+    const mutedOn = await pollUntil(() => this.tabs.isMuted(exampleTab.id), 5000)
+    check('shortcuts: Ctrl+M mutes active tab', mutedOn)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,bubbles:true}))"
+    )
+    const mutedOff = await pollUntil(() => !this.tabs.isMuted(exampleTab.id), 5000)
+    check('shortcuts: Ctrl+M again unmutes', mutedOff)
+    this.switchTab(wikiTab.id)
+
     // Keyboard shortcuts (renderer handler path): Ctrl+Tab cycles tabs, and
     // Ctrl+R must reload the active TAB without ever reloading the shell UI
     // (the shell-reload regression a default app menu would reintroduce).
@@ -735,6 +749,10 @@ class OpenArcApp {
     ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
       const active = this.activeTab()
       return active ? this.tabs.adjustZoom(active.id, action) : 1
+    })
+    ipcMain.handle('tab:mute-toggle', () => {
+      const active = this.activeTab()
+      return active ? this.tabs.toggleMute(active.id) : false
     })
     ipcMain.handle('tab:copy-url', () => {
       const active = this.activeTab()

@@ -81,6 +81,13 @@ export function App(): JSX.Element {
         e.preventDefault()
         applyZoom('reset')
       }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        window.openArc.toggleMute().then((muted) => {
+          setZoomToast(muted ? 'Tab muted' : 'Tab unmuted')
+          setTimeout(() => setZoomToast(null), 1500)
+        })
+      }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
         e.preventDefault()
         window.openArc.copyActiveUrl().then((url) => {
