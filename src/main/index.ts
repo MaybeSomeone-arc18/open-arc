@@ -704,6 +704,23 @@ class OpenArcApp {
     )
     check('shortcuts: Ctrl+W closes active tab', closedByKey)
 
+    // Failed navigations show a friendly in-page error instead of Chromium's
+    this.openTab('http://127.0.0.1:9/')
+    const failTab = this.activeTab()!
+    let errorShown = false
+    const failWc = this.tabs.webContentsFor(failTab.id)
+    if (failWc) {
+      errorShown = await pollUntil(
+        () =>
+          failWc.isDestroyed()
+            ? false
+            : failWc.executeJavaScript("!!document.querySelector('.oa-error')"),
+        15000
+      )
+    }
+    check('error page: failed load shows friendly message', errorShown)
+    this.closeTab(failTab.id)
+
     // Ctrl+Shift+K duplicates the active tab (same URL, becomes active)
     const beforeIds = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
     await this.win.webContents.executeJavaScript(

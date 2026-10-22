@@ -24,6 +24,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Mute tab**: Ctrl+M toggles the active tab's audio
 - **Reader mode**: Ctrl+Alt+R extracts the article into a clean reading view (works best on article pages)
 - **Save as PDF**: Ctrl+P writes the active tab to a PDF in the Downloads folder
+- **Friendly error page**: failed navigations show an in-app error with the URL and reason instead of Chromium's default
 - **Page context menu**: right-click links/images for open-in-new-tab, copy link/image, back/forward/reload, view source, inspect *(item behaviors verified; the native popup is not - see Known limitations)*
 - Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Shift+R hard reload, Ctrl+U view source, Ctrl+Alt+R reader mode, Ctrl+P save as PDF, F12 / Ctrl+Shift+I DevTools, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar, Ctrl+/ shortcut reference
 

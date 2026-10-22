@@ -74,6 +74,36 @@ export class TabLayer {
       tab.url = view.webContents.getURL()
       push()
     })
+    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      // -3 = ERR_ABORTED (a newer navigation superseded this one): not an error.
+      if (!isMainFrame || errorCode === -3) return
+      const info = JSON.stringify({ url: validatedURL, desc: errorDescription })
+      view.webContents
+        .executeJavaScript(`(() => {
+          const info = ${info}
+          document.head.innerHTML = ''
+          document.body.innerHTML = ''
+          document.body.style.cssText = 'margin:0;background:#141418;color:#e8e8ea;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;'
+          const box = document.createElement('div')
+          box.className = 'oa-error'
+          box.style.cssText = 'max-width:520px;text-align:center;padding:32px;'
+          const h = document.createElement('h1')
+          h.textContent = "Couldn't load this page"
+          h.style.cssText = 'font-size:20px;margin:0 0 12px;'
+          const u = document.createElement('div')
+          u.textContent = info.url
+          u.style.cssText = 'font-size:13px;opacity:0.7;word-break:break-all;margin-bottom:12px;'
+          const d = document.createElement('div')
+          d.textContent = info.desc
+          d.style.cssText = 'font-size:13px;opacity:0.55;'
+          const hint = document.createElement('div')
+          hint.textContent = 'Check the address or your connection, then reload (Ctrl+R).'
+          hint.style.cssText = 'font-size:12px;opacity:0.45;margin-top:16px;'
+          box.append(h, u, d, hint)
+          document.body.appendChild(box)
+        })()`)
+        .catch(() => {})
+    })
     view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
     view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
