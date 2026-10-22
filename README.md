@@ -24,6 +24,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Mute tab**: Ctrl+M toggles the active tab's audio
 - **Reader mode**: Ctrl+Alt+R extracts the article into a clean reading view (works best on article pages)
 - **Save as PDF**: Ctrl+P writes the active tab to a PDF in the Downloads folder
+- **Page context menu**: right-click links/images for open-in-new-tab, copy link/image, back/forward/reload, view source, inspect
 - Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Shift+R hard reload, Ctrl+U view source, Ctrl+Alt+R reader mode, Ctrl+P save as PDF, F12 / Ctrl+Shift+I DevTools, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar
 
 Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no dedicated history page (history is searchable from the command bar), single window only. This is a PoC of the product experience, not a daily driver yet.
@@ -32,6 +33,7 @@ Honest gaps: no sync, no accounts, no extensions, no download manager UI (files 
 
 - **Window drag is untested end-to-end.** The drag region is implemented with CSS `-webkit-app-region: drag` on the sidebar/top bar, and minimize / maximize / close are exercised in the automated verification runs, but the runs are headless (Xvfb), so pointer-dragging the window has not been verified in an automated run. It should work on a real desktop; treat it as unverified until someone drags it on a physical machine.
 - **Minimize/maximize state reflection is not asserted headless.** The smoke suite executes the control path (same one the buttons call); under bare Xvfb there is no window manager to honor the state change, so the suite logs observed state instead of asserting it.
+- **The context menu's native popup is unverified on real hardware.** The menu's construction and every item's behavior (copy link to the real clipboard, open link in a new tab, navigation) are asserted in the smoke suite, but right-clicking to summon the popup itself has only been exercised in a headless container.
 - **Find-in-page (Ctrl+F) is unverified on real hardware.** The implementation uses the standard `webContents.findInPage` / `found-in-page` flow (proven working in a standalone Electron harness), but in headless containers the result event never dispatches to an app's WebContentsView, so the smoke suite cannot assert it. Treat it as unverified until someone runs Ctrl+F on a physical machine.
 - **Tab-content screenshots can be unavailable in restricted containers.** The suite's functional checks (titles, URLs, state) do not depend on pixels; page-content captures are saved when the compositor cooperates and skipped with a log note when it does not.
 

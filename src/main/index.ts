@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, session, clipboard } from 'electron'
 import { readerToggle } from './reader'
+import { buildPageContextMenu } from './contextmenu'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -723,6 +724,32 @@ class OpenArcApp {
       `tab=${popTab?.url ?? 'none'} windows=${BrowserWindow.getAllWindows().length}->${winsBefore}`
     )
     if (popTab) this.closeTab(popTab.id)
+    this.switchTab(exampleTab.id)
+
+    // Context menu builder: link items fire their real handlers (the native
+    // popup itself is not assertable headless - see README).
+    const ctxWc = this.tabs.webContentsFor(exampleTab.id)!
+    const ctxItems = buildPageContextMenu(
+      { linkURL: 'https://example.org/', selectionText: '', mediaType: 'none', x: 10, y: 10 } as Electron.ContextMenuParams,
+      ctxWc,
+      (url) => this.openTab(url)
+    )
+    const copyLink = ctxItems.find((i) => i.label === 'Copy Link Address')
+    copyLink?.click?.({} as Electron.MenuItem, this.win, {} as Electron.KeyboardEvent)
+    const linkClip = await clipboard.readText()
+    const openLink = ctxItems.find((i) => i.label === 'Open Link in New Tab')
+    const beforeCtx = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
+    openLink?.click?.({} as Electron.MenuItem, this.win, {} as Electron.KeyboardEvent)
+    const ctxTab = await pollUntil(
+      () => [...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => !beforeCtx.has(t.id)),
+      5000
+    ).then(() => [...this.activeSpace().pinned, ...this.activeSpace().today].find((t) => !beforeCtx.has(t.id)))
+    check(
+      'context menu: copy link + open in new tab',
+      linkClip === 'https://example.org/' && !!ctxTab && ctxTab.url.includes('example.org'),
+      `clip="${linkClip}" tab=${ctxTab?.url ?? 'none'}`
+    )
+    if (ctxTab) this.closeTab(ctxTab.id)
     this.switchTab(exampleTab.id)
 
     // Ctrl+P saves the active tab as a real PDF into ~/Downloads

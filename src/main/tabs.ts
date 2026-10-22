@@ -1,4 +1,5 @@
-import { BrowserWindow, WebContentsView, type Rectangle } from 'electron'
+import { BrowserWindow, Menu, WebContentsView, type Rectangle } from 'electron'
+import { buildPageContextMenu } from './contextmenu'
 import type { Space, TabItem } from '../shared/types'
 
 const SIDEBAR_WIDTH = 280
@@ -78,6 +79,9 @@ export class TabLayer {
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
+    })
+    view.webContents.on('context-menu', (_e, params) => {
+      Menu.buildFromTemplate(buildPageContextMenu(params, view.webContents, (url) => this.onOpenInNewTab(url))).popup()
     })
     // Popups (window.open, target=_blank) become tabs in this shell, never OS windows.
     view.webContents.setWindowOpenHandler(({ url }) => {
