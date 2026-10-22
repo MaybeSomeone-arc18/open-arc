@@ -10,11 +10,20 @@ export function App(): JSX.Element {
   const [findBarOpen, setFindBarOpen] = useState(false)
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set())
   const [downloadToast, setDownloadToast] = useState<string | null>(null)
+  const [zoomToast, setZoomToast] = useState<string | null>(null)
 
   useEffect(() => {
     window.openArc.getState().then(setState)
     const off = window.openArc.onStateChanged(setState)
     let toastTimer: ReturnType<typeof setTimeout> | null = null
+    let zoomTimer: ReturnType<typeof setTimeout> | null = null
+    const applyZoom = (action: 'in' | 'out' | 'reset'): void => {
+      window.openArc.zoom(action).then((factor) => {
+        setZoomToast(`Zoom ${Math.round(factor * 100)}%`)
+        if (zoomTimer) clearTimeout(zoomTimer)
+        zoomTimer = setTimeout(() => setZoomToast(null), 1500)
+      })
+    }
     const offDownload = window.openArc.onDownloadDone((info) => {
       setDownloadToast(
         info.state === 'completed' ? `Downloaded ${info.filename}` : `Download ${info.state}: ${info.filename}`
@@ -59,6 +68,18 @@ export function App(): JSX.Element {
       if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         setFindBarOpen(true)
+      }
+      if (mod && !e.shiftKey && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        applyZoom('in')
+      }
+      if (mod && !e.shiftKey && e.key === '-') {
+        e.preventDefault()
+        applyZoom('out')
+      }
+      if (mod && !e.shiftKey && e.key === '0') {
+        e.preventDefault()
+        applyZoom('reset')
       }
       if (mod && e.key === 'Tab') {
         e.preventDefault()
@@ -107,6 +128,7 @@ export function App(): JSX.Element {
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
       {findBarOpen && <FindBar onClose={() => setFindBarOpen(false)} />}
       {downloadToast && <div className="download-toast">{downloadToast}</div>}
+      {zoomToast && <div className="download-toast">{zoomToast}</div>}
       {!state.sidebarVisible && (
         <button className="sidebar-reopen" title="Show sidebar (Ctrl+S)" onClick={() => window.openArc.toggleSidebar()}>
           »

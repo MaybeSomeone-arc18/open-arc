@@ -130,6 +130,29 @@ export class TabLayer {
     this.views.get(tabId)?.webContents.stopFindInPage('clearSelection')
   }
 
+  private static readonly ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+  adjustZoom(tabId: string, action: 'in' | 'out' | 'reset'): number {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return 1
+    if (action === 'reset') {
+      wc.setZoomFactor(1)
+      return 1
+    }
+    const cur = wc.getZoomFactor()
+    const steps = TabLayer.ZOOM_STEPS
+    const next =
+      action === 'in'
+        ? (steps.find((z) => z > cur + 0.001) ?? steps[steps.length - 1])
+        : ([...steps].reverse().find((z) => z < cur - 0.001) ?? steps[0])
+    wc.setZoomFactor(next)
+    return next
+  }
+
+  getZoom(tabId: string): number {
+    return this.views.get(tabId)?.webContents.getZoomFactor() ?? 1
+  }
+
   navigate(tabId: string, command: 'back' | 'forward' | 'reload'): void {
     const wc = this.views.get(tabId)?.webContents
     if (!wc) return

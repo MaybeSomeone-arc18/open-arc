@@ -33,6 +33,7 @@ const api: OpenArcApi = {
   navigate: (cmd) => ipcRenderer.send('nav', cmd),
   findInPage: (text, findNext) => ipcRenderer.invoke('find:in-page', text, !!findNext),
   stopFind: () => ipcRenderer.send('find:stop'),
+  zoom: (action) => ipcRenderer.invoke('tab:zoom', action),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
 

@@ -479,6 +479,19 @@ class OpenArcApp {
       this.loadingEvents.includes(`${exampleTab.id}:start`) && this.loadingEvents.includes(`${exampleTab.id}:stop`)
     )
 
+    // Zoom: Ctrl+= zooms the active tab in through the real keyboard path,
+    // Ctrl+0 resets. Asserted on the tab's live zoom factor.
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'=',ctrlKey:true,bubbles:true}))"
+    )
+    const zoomedIn = await pollUntil(() => Math.abs(this.tabs.getZoom(exampleTab.id) - 1.1) < 0.001, 5000)
+    check('zoom: Ctrl+= zooms active tab to 110%', zoomedIn, `factor=${this.tabs.getZoom(exampleTab.id)}`)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'0',ctrlKey:true,bubbles:true}))"
+    )
+    const zoomReset = await pollUntil(() => Math.abs(this.tabs.getZoom(exampleTab.id) - 1) < 0.001, 5000)
+    check('zoom: Ctrl+0 resets to 100%', zoomReset, `factor=${this.tabs.getZoom(exampleTab.id)}`)
+
     // Find-in-page is NOT smoke-checked here: in this container the
     // found-in-page event never dispatches to an app's WebContentsView
     // (proven env-specific: the identical call fires fine in a standalone
@@ -681,6 +694,10 @@ class OpenArcApp {
     ipcMain.on('find:stop', () => {
       const active = this.activeTab()
       if (active) this.tabs.stopFind(active.id)
+    })
+    ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
+      const active = this.activeTab()
+      return active ? this.tabs.adjustZoom(active.id, action) : 1
     })
     ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
       const active = this.activeTab()
