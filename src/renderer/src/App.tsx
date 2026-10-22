@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AppState } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
 import { CommandBar } from './components/CommandBar'
+import { FindBar } from './components/FindBar'
 
 export function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null)
   const [commandBarOpen, setCommandBarOpen] = useState(false)
+  const [findBarOpen, setFindBarOpen] = useState(false)
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set())
   const [downloadToast, setDownloadToast] = useState<string | null>(null)
 
@@ -54,6 +56,10 @@ export function App(): JSX.Element {
         e.preventDefault()
         setCommandBarOpen(true)
       }
+      if (mod && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setFindBarOpen(true)
+      }
       if (mod && e.key === 'Tab') {
         e.preventDefault()
         window.openArc.runCommand(e.shiftKey ? 'prev-tab' : 'next-tab')
@@ -78,7 +84,7 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('close-split')
       }
-      if (e.key === 'Escape') setCommandBarOpen(false)
+      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false) }
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -99,6 +105,7 @@ export function App(): JSX.Element {
     <div className="app" style={{ ['--space-color' as string]: space.color }}>
       {state.sidebarVisible && <Sidebar state={state} space={space} loadingTabs={loadingTabs} onOpenCommandBar={() => setCommandBarOpen(true)} />}
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
+      {findBarOpen && <FindBar onClose={() => setFindBarOpen(false)} />}
       {downloadToast && <div className="download-toast">{downloadToast}</div>}
       {!state.sidebarVisible && (
         <button className="sidebar-reopen" title="Show sidebar (Ctrl+S)" onClick={() => window.openArc.toggleSidebar()}>

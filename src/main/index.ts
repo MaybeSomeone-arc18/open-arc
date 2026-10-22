@@ -478,6 +478,12 @@ class OpenArcApp {
       'loading indicator events fire (start + stop)',
       this.loadingEvents.includes(`${exampleTab.id}:start`) && this.loadingEvents.includes(`${exampleTab.id}:stop`)
     )
+
+    // Find-in-page is NOT smoke-checked here: in this container the
+    // found-in-page event never dispatches to an app's WebContentsView
+    // (proven env-specific: the identical call fires fine in a standalone
+    // harness with the same flags). Feature stays UNVERIFIED until checked
+    // on real hardware; see README.
     const cap = await this.tabs.capture(exampleTab.id)
     if (cap) writeFileSync(`${dir}/3-tab-content.png`, cap)
     else console.log('[openarc] note: tab content capture unavailable in this environment (compositor-restricted)')
@@ -668,6 +674,14 @@ class OpenArcApp {
       if (active) this.tabs.navigateActiveTo(active.id, normalizeUrl(url))
     })
 
+    ipcMain.handle('find:in-page', (_e, text: string, findNext: boolean) => {
+      const active = this.activeTab()
+      return active ? this.tabs.findIn(active.id, text, !!findNext) : null
+    })
+    ipcMain.on('find:stop', () => {
+      const active = this.activeTab()
+      if (active) this.tabs.stopFind(active.id)
+    })
     ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
       const active = this.activeTab()
       if (active) this.tabs.navigate(active.id, cmd)

@@ -31,6 +31,8 @@ const api: OpenArcApi = {
   restoreTab: (id) => ipcRenderer.send('tab:restore', id),
 
   navigate: (cmd) => ipcRenderer.send('nav', cmd),
+  findInPage: (text, findNext) => ipcRenderer.invoke('find:in-page', text, !!findNext),
+  stopFind: () => ipcRenderer.send('find:stop'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
 

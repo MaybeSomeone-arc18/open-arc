@@ -75,6 +75,8 @@ export interface OpenArcApi {
   restoreTab(tabId: string): void
 
   navigate(command: 'back' | 'forward' | 'reload'): void
+  findInPage(text: string, findNext?: boolean): Promise<{ matches: number; activeMatchOrdinal: number } | null>
+  stopFind(): void
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'close'): void
 

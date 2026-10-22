@@ -25,6 +25,7 @@ Honest gaps: no sync, no accounts, no extensions, no download manager UI (files 
 
 - **Window drag is untested end-to-end.** The drag region is implemented with CSS `-webkit-app-region: drag` on the sidebar/top bar, and minimize / maximize / close are exercised in the automated verification runs, but the runs are headless (Xvfb), so pointer-dragging the window has not been verified in an automated run. It should work on a real desktop; treat it as unverified until someone drags it on a physical machine.
 - **Minimize/maximize state reflection is not asserted headless.** The smoke suite executes the control path (same one the buttons call); under bare Xvfb there is no window manager to honor the state change, so the suite logs observed state instead of asserting it.
+- **Find-in-page (Ctrl+F) is unverified on real hardware.** The implementation uses the standard `webContents.findInPage` / `found-in-page` flow (proven working in a standalone Electron harness), but in headless containers the result event never dispatches to an app's WebContentsView, so the smoke suite cannot assert it. Treat it as unverified until someone runs Ctrl+F on a physical machine.
 - **Tab-content screenshots can be unavailable in restricted containers.** The suite's functional checks (titles, URLs, state) do not depend on pixels; page-content captures are saved when the compositor cooperates and skipped with a log note when it does not.
 
 ### Related projects

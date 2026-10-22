@@ -104,6 +104,32 @@ export class TabLayer {
     this.views.delete(tabId)
   }
 
+  findIn(tabId: string, text: string, findNext = false): Promise<Electron.FoundInPageResult | null> {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return Promise.resolve(null)
+    if (!text.trim()) {
+      wc.stopFindInPage('clearSelection')
+      return Promise.resolve(null)
+    }
+    // Clear any stale find session first; a wedged session can swallow the
+    // next request's found-in-page dispatch.
+    wc.stopFindInPage('clearSelection')
+    const attempt = (): Promise<Electron.FoundInPageResult | null> =>
+      new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000) // no-match environments must not hang
+        wc.once('found-in-page', (_e, result) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+        wc.findInPage(text, { forward: true, findNext })
+      })
+    return attempt().then((r) => r ?? attempt())
+  }
+
+  stopFind(tabId: string): void {
+    this.views.get(tabId)?.webContents.stopFindInPage('clearSelection')
+  }
+
   navigate(tabId: string, command: 'back' | 'forward' | 'reload'): void {
     const wc = this.views.get(tabId)?.webContents
     if (!wc) return

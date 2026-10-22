@@ -46,7 +46,17 @@ function launch(phase) {
     }
     // Software-compositing flags must ride the real command line; some
     // Chromium switches are unreliable via appendSwitch in every environment.
-    const gpuFlags = ['--no-sandbox', '--in-process-gpu', '--disable-gpu-compositing']
+    const gpuFlags = [
+      '--no-sandbox',
+      '--in-process-gpu',
+      '--disable-gpu-compositing',
+      // Containers can end up with a broken zygote spawn path (renderer
+      // processes die silently right after did-start-loading, which also
+      // stalls findInPage/executeJavaScript). Launching renderers directly
+      // keeps the suite reliable there; harmless on a normal desktop.
+      '--no-zygote',
+      '--disable-dev-shm-usage'
+    ]
     let cmd = electronPath
     let args = ['.', ...gpuFlags]
     if (!process.env.DISPLAY) {
