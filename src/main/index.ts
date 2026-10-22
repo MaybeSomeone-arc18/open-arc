@@ -349,6 +349,12 @@ class OpenArcApp {
         this.commit()
         break
       }
+      case 'duplicate-tab': {
+        if (!active) break
+        const url = this.tabs.currentUrl(active.id) ?? active.url
+        if (url) this.openTab(url)
+        break
+      }
       case 'reopen-closed-tab': {
         const entry = this.state.recentlyClosed.shift()
         if (!entry) break
@@ -566,6 +572,23 @@ class OpenArcApp {
     )
     const mutedOff = await pollUntil(() => !this.tabs.isMuted(exampleTab.id), 5000)
     check('shortcuts: Ctrl+M again unmutes', mutedOff)
+    this.switchTab(wikiTab.id)
+
+    // Ctrl+Shift+K duplicates the active tab (same URL, becomes active)
+    const beforeIds = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'K',ctrlKey:true,shiftKey:true,bubbles:true}))"
+    )
+    const dupTab = await pollUntil(
+      () => [...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => !beforeIds.has(t.id)),
+      5000
+    ).then(() => [...this.activeSpace().pinned, ...this.activeSpace().today].find((t) => !beforeIds.has(t.id)))
+    check(
+      'shortcuts: Ctrl+Shift+K duplicates active tab',
+      !!dupTab && dupTab.url.includes('wikipedia.org/wiki/Web_browser') && this.activeSpace().activeTabId === dupTab.id,
+      `dupUrl=${dupTab?.url ?? 'none'}`
+    )
+    if (dupTab) this.closeTab(dupTab.id)
     this.switchTab(wikiTab.id)
 
     // Keyboard shortcuts (renderer handler path): Ctrl+Tab cycles tabs, and

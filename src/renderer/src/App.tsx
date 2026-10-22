@@ -88,6 +88,10 @@ export function App(): JSX.Element {
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        window.openArc.runCommand('duplicate-tab')
+      }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
         e.preventDefault()
         window.openArc.copyActiveUrl().then((url) => {
