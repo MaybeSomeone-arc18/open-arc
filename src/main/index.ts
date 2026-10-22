@@ -10,7 +10,12 @@ const isDev = !!process.env.ELECTRON_RENDERER_URL
 
 // Verification-harness hooks (no effect in normal use)
 if (process.env.OPEN_ARC_USER_DATA) app.setPath('userData', process.env.OPEN_ARC_USER_DATA)
-if (process.env.OPEN_ARC_NO_SANDBOX) app.commandLine.appendSwitch('no-sandbox')
+if (process.env.OPEN_ARC_NO_SANDBOX) {
+  app.commandLine.appendSwitch('no-sandbox')
+  // Headless CI containers often mount /dev/shm noexec, which kills tab
+  // renderers; fall back to /tmp for Chromium shared memory in harness runs.
+  app.commandLine.appendSwitch('disable-dev-shm-usage')
+}
 
 const SPACE_PALETTE = ['#7c6cf0', '#3fa66a', '#d0607e', '#4a90d9', '#d9963f', '#5bc8c0']
 
@@ -291,8 +296,12 @@ class OpenArcApp {
   }
 
   /**
-   * Verification harness (OPEN_ARC_SHOT_DIR set): captures real screenshots of
-   * the shell UI, the command bar, and the live tab content layer, then quits.
+   * Verification harness (OPEN_ARC_SHOT_DIR set): drives the real app through
+   * the smoke suite - window controls, command bar, navigation, tab switching,
+   * spaces, split view, auto-archive - captures genuine screenshots and writes
+   * report-run.json, then quits. With OPEN_ARC_PHASE=verify it instead checks
+   * that a previous run's state survived the restart (persistence check).
+   * No effect in normal use.
    */
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
@@ -304,40 +313,123 @@ class OpenArcApp {
       const img = await this.win.webContents.capturePage()
       writeFileSync(`${dir}/${name}.png`, img.toPNG())
     }
-    await wait(3500) // let the active tab's WebContentsView load
-    console.log('[openarc] capturing 1-shell')
+    const checks: { name: string; pass: boolean; detail: string }[] = []
+    const check = (name: string, pass: boolean, detail = ''): void => {
+      checks.push({ name, pass, detail })
+      console.log(`[openarc] ${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ' - ' + detail : ''}`)
+    }
+    const pollUntil = async (fn: () => boolean, ms: number): Promise<boolean> => {
+      const end = Date.now() + ms
+      while (Date.now() < end) {
+        if (fn()) return true
+        await wait(250)
+      }
+      return fn()
+    }
+
+    if (process.env.OPEN_ARC_PHASE === 'verify') {
+      // Second launch over the same profile: the run phase's state must survive.
+      await wait(2500)
+      const personal = this.state.spaces.find((s) => s.name === 'Personal')
+      const smoke = this.state.spaces.find((s) => s.name === 'Smoke')
+      check('persist: spaces survive restart', !!personal && !!smoke, `${this.state.spaces.length} spaces loaded`)
+      check('persist: pinned tab survives restart', !!personal?.pinned.find((t) => t.url.includes('example.com')))
+      check('persist: archived tab survives restart', !!personal?.archived.find((t) => t.url.includes('wikipedia.org')))
+      await shot('6-relaunch-restored')
+      writeFileSync(`${dir}/report-verify.json`, JSON.stringify({ phase: 'verify', checks }, null, 2))
+      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      return
+    }
+
+    await wait(3500)
     await shot('1-shell')
-    // window controls: exercise the same path the traffic-light buttons use
-    this.windowControl('minimize')
-    await wait(300)
-    this.win.restore()
-    this.windowControl('maximize')
-    await wait(300)
-    this.windowControl('maximize') // toggles back
-    console.log('[openarc] window controls OK (minimize/restore/maximize/unmaximize)')
-    // archiver: startup tick fires at 5s; capture its effect if any
-    await wait(5000)
-    await shot('1b-after-archive-tick')
-    console.log('[openarc] archive tick captured')
-    this.win.webContents.executeJavaScript(
+
+    // Window controls: the app's control path (same one the buttons call) must
+    // execute. State reflection (isMinimized/isMaximized) needs a real window
+    // manager; under bare Xvfb there is none, so we log observed state instead
+    // of asserting it. Window drag is CSS app-region and untestable headless.
+    try {
+      this.windowControl('minimize')
+      const minimized = this.win.isMinimized()
+      this.win.restore()
+      this.windowControl('maximize')
+      const maximized = this.win.isMaximized()
+      this.windowControl('maximize') // toggles back
+      check('window controls execute (minimize/restore/maximize)', true, `state observed: minimized=${minimized} maximized=${maximized} (needs a WM to reflect)`)
+    } catch (e) {
+      check('window controls execute (minimize/restore/maximize)', false, String(e))
+    }
+
+    // Command bar opens on Ctrl+T (real keydown dispatched into the renderer)
+    await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
     )
     await wait(700)
+    const barOpen = await this.win.webContents.executeJavaScript("!!document.querySelector('.command-bar')")
+    check('command bar opens (Ctrl+T)', barOpen === true)
     await shot('2-commandbar')
-    this.win.webContents.executeJavaScript(
+    await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
     )
-    await wait(400)
-    const active = this.activeTab()
-    if (active) {
-      const view = (this.tabs as unknown as { views: Map<string, { webContents: Electron.WebContents }> }).views.get(active.id)
-      if (view) {
-        const img = await view.webContents.capturePage()
-        writeFileSync(`${dir}/3-tab-content.png`, img.toPNG())
-      }
-    }
-    console.log('[openarc] selftest done, exiting')
-    app.exit(0)
+    await wait(300)
+
+    // Navigation: open a real page and wait for its real title
+    this.openTab('https://example.com')
+    const exampleTab = this.activeTab()!
+    const loaded = await pollUntil(() => exampleTab.title === 'Example Domain', 15000)
+    check('navigation: example.com loads (live title)', loaded, `title="${exampleTab.title}"`)
+    const cap = await this.tabs.capture(exampleTab.id)
+    if (cap) writeFileSync(`${dir}/3-tab-content.png`, cap)
+    else console.log('[openarc] note: tab content capture unavailable in this environment (compositor-restricted)')
+
+    // In-tab navigation + back
+    this.tabs.navigateActiveTo(exampleTab.id, 'https://example.org/')
+    const wentOrg = await pollUntil(() => (this.tabs.currentUrl(exampleTab.id) ?? '').includes('example.org'), 10000)
+    this.tabs.navigate(exampleTab.id, 'back')
+    const cameBack = await pollUntil(() => (this.tabs.currentUrl(exampleTab.id) ?? '').includes('example.com'), 10000)
+    check('navigation: forward + back', wentOrg && cameBack)
+
+    // Tab switching within a space
+    this.openTab('https://en.wikipedia.org/wiki/Web_browser')
+    const wikiTab = this.activeTab()!
+    await pollUntil(() => wikiTab.title.includes('Wikipedia'), 15000)
+    this.switchTab(exampleTab.id)
+    const withinOk = this.activeSpace().activeTabId === exampleTab.id
+    this.switchTab(wikiTab.id)
+    check('tab switching within space', withinOk)
+
+    // Split view on/off
+    this.runCommand('split-view')
+    const splitOn = this.activeSpace().splitTabId !== null
+    await wait(1500)
+    const capA = await this.tabs.capture(this.activeSpace().activeTabId!)
+    const capB = this.activeSpace().splitTabId ? await this.tabs.capture(this.activeSpace().splitTabId!) : null
+    if (capA) writeFileSync(`${dir}/4-split-primary.png`, capA)
+    if (capB) writeFileSync(`${dir}/4-split-partner.png`, capB)
+    this.runCommand('split-view')
+    check('split view on/off', splitOn && this.activeSpace().splitTabId === null)
+
+    // Spaces: create + activate, then cross-space tab follow
+    const before = this.state.spaces.length
+    this.createSpace('Smoke')
+    check('spaces: create + activate', this.state.spaces.length === before + 1 && this.activeSpace().name === 'Smoke')
+    this.switchTab(exampleTab.id)
+    check('spaces: cross-space tab switch follows tab', this.activeSpace().name === 'Personal' && this.activeSpace().activeTabId === exampleTab.id)
+
+    // Pin
+    this.setPinned(exampleTab.id, true)
+    check('pin tab', this.activeSpace().pinned.some((t) => t.id === exampleTab.id))
+
+    // Auto-archive: idle the wiki tab beyond the threshold, then tick
+    wikiTab.lastActiveAt = Date.now() - this.state.archiveAfterMs - 1000
+    const moved = this.archiveIdle(false)
+    await wait(500)
+    check('auto-archive: idle tab moves to archive', moved >= 1 && this.activeSpace().archived.some((t) => t.id === wikiTab.id))
+    await shot('5-auto-archive')
+
+    this.store.flush(this.state)
+    writeFileSync(`${dir}/report-run.json`, JSON.stringify({ phase: 'run', checks }, null, 2))
+    app.exit(checks.every((c) => c.pass) ? 0 : 1)
   }
 
   private windowControl(action: 'minimize' | 'maximize' | 'close'): void {

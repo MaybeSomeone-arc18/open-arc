@@ -109,6 +109,21 @@ export class TabLayer {
   navigateActiveTo(tabId: string, url: string): void {
     this.views.get(tabId)?.webContents.loadURL(url)
   }
+
+  currentUrl(tabId: string): string | null {
+    return this.views.get(tabId)?.webContents.getURL() ?? null
+  }
+
+  /** Genuine pixels of one tab's page (used by the smoke suite for evidence).
+   *  Returns null when the compositor cannot produce frames (restricted
+   *  headless containers) - callers treat that as "no pixels", never a failure. */
+  async capture(tabId: string): Promise<Buffer | null> {
+    const view = this.views.get(tabId)
+    if (!view) return null
+    const img = await view.webContents.capturePage()
+    if (img.isEmpty()) return null
+    return img.toPNG()
+  }
 }
 
 export { SIDEBAR_WIDTH }

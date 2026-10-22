@@ -22,6 +22,28 @@ Honest gaps: no sync, no accounts, no extensions, no downloads UI, no history se
 ### Known limitations
 
 - **Window drag is untested end-to-end.** The drag region is implemented with CSS `-webkit-app-region: drag` on the sidebar/top bar, and minimize / maximize / close are exercised in the automated verification runs, but the runs are headless (Xvfb), so pointer-dragging the window has not been verified in an automated run. It should work on a real desktop; treat it as unverified until someone drags it on a physical machine.
+- **Minimize/maximize state reflection is not asserted headless.** The smoke suite executes the control path (same one the buttons call); under bare Xvfb there is no window manager to honor the state change, so the suite logs observed state instead of asserting it.
+- **Tab-content screenshots can be unavailable in restricted containers.** The suite's functional checks (titles, URLs, state) do not depend on pixels; page-content captures are saved when the compositor cooperates and skipped with a log note when it does not.
+
+## Verifying
+
+From a clean checkout (Node 22+, Linux/macOS/Windows):
+
+```bash
+npm install
+npm run typecheck   # tsc --noEmit
+npm run build       # electron-vite build into out/
+npm run shot        # smoke suite: launches the real app twice and checks it
+```
+
+`npm run shot` (`scripts/screenshot.mjs`) runs the production build against a fresh temporary profile, twice:
+
+- **Run phase** - window controls execute, command bar opens on Ctrl+T, example.com loads with its real title, in-tab forward/back navigation, tab switching within a space, split view on/off, space creation, cross-space tab switching, pinning, auto-archive of an idle tab. Genuine screenshots land in `shots/` alongside `report-run.json`.
+- **Verify phase** - relaunches on the same profile and checks that spaces, pinned tabs and the archive survived the restart (`report-verify.json`).
+
+The suite exits non-zero if any check fails. On headless Linux it wraps itself in `xvfb-run`. It needs network access - the navigation checks load example.com, example.org and wikipedia.org for real.
+
+What the suite does **not** cover: pointer-driven window dragging, minimize/maximize state reflection (needs a real window manager), downloads, extensions, multi-window, and any manual UI interaction.
 
 ## Architecture
 
@@ -46,6 +68,16 @@ npm run preview    # run the production build
 ```
 
 Node 22+ required. Linux/macOS/Windows.
+
+## Security notes
+
+`npm audit` (2026-10-23) reports 9 advisories, all in **development-time** dependencies:
+
+- `electron` 33.4.11: known advisories including an ASAR integrity bypass (GHSA-vmqv-hx8q-j7mg). These matter for a packaged, distributed app; this PoC runs unpackaged in development. A major-version Electron upgrade is deliberately deferred until the PoC matures.
+- `esbuild` / `vite`: dev-server request forgery (GHSA-67mh-4wv8-2f99) - only affects `npm run dev` on an untrusted network.
+- `extract-zip` via `@electron/get`: install-time download tooling only.
+
+Runtime dependencies shipped to the app (`react`, `react-dom`) have no known advisories at audit time. Re-run `npm audit` before any packaged release.
 
 ## License
 
