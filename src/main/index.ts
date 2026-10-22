@@ -61,7 +61,8 @@ function defaultState(): AppState {
     sidebarVisible: true,
     archiveAfterMs: Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000,
     recentlyClosed: [],
-    windowBounds: null
+    windowBounds: null,
+    history: []
   }
 }
 
@@ -70,6 +71,7 @@ function migrate(state: AppState): AppState {
   state.archiveAfterMs = Number(process.env.OPEN_ARC_ARCHIVE_MS) || state.archiveAfterMs || 12 * 60 * 60 * 1000
   state.recentlyClosed = state.recentlyClosed ?? []
   state.windowBounds = state.windowBounds ?? null
+  state.history = state.history ?? []
   for (const s of state.spaces) {
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
@@ -100,6 +102,20 @@ class OpenArcApp {
   private activeTab(): TabItem | null {
     const space = this.activeSpace()
     return [...space.pinned, ...space.today].find((t) => t.id === space.activeTabId) ?? null
+  }
+
+  /** Most-recent-first history; consecutive same-URL entries merge (title refresh). */
+  private recordHistory(tab: TabItem): void {
+    const url = tab.url
+    if (!/^https?:\/\//.test(url)) return
+    const h = this.state.history
+    if (h[0]?.url === url) {
+      h[0].title = tab.title || h[0].title
+      h[0].visitedAt = Date.now()
+      return
+    }
+    h.unshift({ url, title: tab.title || url, visitedAt: Date.now() })
+    if (h.length > 500) h.length = 500
   }
 
   /** Single mutation funnel: persist + re-render + re-layout views. */
@@ -155,7 +171,8 @@ class OpenArcApp {
       (tabId, loading) => {
         this.loadingEvents.push(`${tabId}:${loading ? 'start' : 'stop'}`)
         if (!this.win.isDestroyed()) this.win.webContents.send('tab:loading', tabId, loading)
-      }
+      },
+      (tab) => this.recordHistory(tab)
     )
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
@@ -526,6 +543,14 @@ class OpenArcApp {
     const cameBack = await pollUntil(() => (this.tabs.currentUrl(exampleTab.id) ?? '').includes('example.com'), 10000)
     check('navigation: forward + back', wentOrg && cameBack)
 
+    // History: both navigations recorded (most recent first)
+    const hist = this.state.history
+    check(
+      'history: navigations recorded',
+      hist.some((h) => h.url.includes('example.org')) && hist.some((h) => h.url.includes('example.com')),
+      `n=${hist.length}`
+    )
+
     // Tab switching within a space
     this.openTab('https://en.wikipedia.org/wiki/Web_browser')
     const wikiTab = this.activeTab()!
@@ -623,6 +648,34 @@ class OpenArcApp {
       "[...document.querySelectorAll('.command-row')].map(r=>r.textContent).join('|')"
     )
     check('command bar: fuzzy subsequence finds tab', /Wikipedia/i.test(rowTexts), rowTexts.slice(0, 80))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+
+    // Command bar also surfaces history rows for past navigations
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
+    )
+    let histBarUp = false
+    for (let i = 0; i < 20 && !histBarUp; i++) {
+      histBarUp = await this.win.webContents.executeJavaScript("!!document.querySelector('.command-input')")
+      if (!histBarUp) await wait(250)
+    }
+    const histSet: string = await this.win.webContents.executeJavaScript(
+      "(()=>{const i=document.querySelector('.command-input'); if(!i) return 'NO-INPUT';" +
+        "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(i,'xmpl.org');" +
+        "i.dispatchEvent(new Event('input',{bubbles:true})); return 'OK'})()"
+    )
+    await wait(400)
+    const histRowTexts: string = await this.win.webContents.executeJavaScript(
+      "[...document.querySelectorAll('.command-row')].map(r=>r.textContent).join('|')"
+    )
+    check(
+      'command bar: history rows surface',
+      histBarUp && histSet === 'OK' && /history/i.test(histRowTexts),
+      `barUp=${histBarUp} set=${histSet} rows=${histRowTexts.slice(0, 80)}`
+    )
     await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
     )

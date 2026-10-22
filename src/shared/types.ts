@@ -36,6 +36,12 @@ export interface ClosedTab {
   closedAt: number
 }
 
+export interface HistoryEntry {
+  url: string
+  title: string
+  visitedAt: number
+}
+
 export interface AppState {
   spaces: Space[]
   activeSpaceId: string
@@ -46,6 +52,8 @@ export interface AppState {
   recentlyClosed: ClosedTab[]
   /** Last non-maximized window bounds, restored on launch. */
   windowBounds: { x: number; y: number; width: number; height: number } | null
+  /** Navigation history, most recent first, capped at 500. */
+  history: HistoryEntry[]
 }
 
 export interface CommandDef {

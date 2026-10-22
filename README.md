@@ -12,8 +12,9 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - Vertical sidebar with **Spaces** (create, switch, rename, per-space theme color and icon)
 - **Pinned** and **Today** tab tiers per Space; pin/unpin; close; switch
 - **Split view**: two tabs side by side (Ctrl+Shift+= to toggle, Ctrl+Shift+- to close)
-- **Command bar** (Ctrl+T): fuzzy search across commands and open tabs, URL/search entry
+- **Command bar** (Ctrl+T): fuzzy search across commands, open tabs, archive and browsing history, URL/search entry
 - **Auto-archive**: idle Today tabs move to a restorable Archive (12 h default, pinned tabs never archive)
+- **History**: navigations are recorded (most recent 500) and searchable from the command bar
 - **Persistence**: spaces, pins, tabs, archive and window state survive restarts (atomic JSON writes)
 - Frameless window with working minimize / maximize / close and a drag region
 - **Downloads**: files save to the system Downloads folder with a completion toast
@@ -23,7 +24,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Mute tab**: Ctrl+M toggles the active tab's audio
 - Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+Shift+K duplicate tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar
 
-Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no history search, single window only. This is a PoC of the product experience, not a daily driver yet.
+Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no dedicated history page (history is searchable from the command bar), single window only. This is a PoC of the product experience, not a daily driver yet.
 
 ### Known limitations
 

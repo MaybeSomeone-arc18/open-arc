@@ -16,7 +16,12 @@ export class TabLayer {
   private onTabUpdated: (tab: TabItem) => void
   private onLoading: (tabId: string, loading: boolean) => void
 
-  constructor(win: BrowserWindow, onTabUpdated: (tab: TabItem) => void, onLoading: (tabId: string, loading: boolean) => void = () => {}) {
+  constructor(
+    win: BrowserWindow,
+    onTabUpdated: (tab: TabItem) => void,
+    onLoading: (tabId: string, loading: boolean) => void = () => {},
+    private onNavigate: (tab: TabItem) => void = () => {}
+  ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
     this.onLoading = onLoading
@@ -54,9 +59,13 @@ export class TabLayer {
       tab.title = view.webContents.getTitle() || tab.url
       this.onTabUpdated({ ...tab, title: tab.title })
     }
-    view.webContents.on('page-title-updated', push)
+    view.webContents.on('page-title-updated', () => {
+      push()
+      this.onNavigate(tab) // dedupe path refreshes the recorded title
+    })
     view.webContents.on('did-navigate', () => {
       tab.url = view.webContents.getURL()
+      this.onNavigate(tab)
       push()
     })
     view.webContents.on('did-navigate-in-page', () => {

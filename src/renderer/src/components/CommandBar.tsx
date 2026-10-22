@@ -8,7 +8,7 @@ interface Props {
 }
 
 interface Row {
-  kind: 'open-url' | 'command' | 'tab' | 'archived'
+  kind: 'open-url' | 'command' | 'tab' | 'archived' | 'history'
   id: string
   title: string
   hint?: string
@@ -67,9 +67,15 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
         .filter((e) => e.score !== null)
         .sort((a, b) => a.score! - b.score!)
       out.push(...archRows.map((e) => e.row))
+      const histRows = state.history
+        .map((h) => ({ row: { kind: 'history', id: h.url, title: h.title || h.url, hint: 'history' } as Row, score: best(h.title, h.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+        .slice(0, 4)
+      out.push(...histRows.map((e) => e.row))
     }
     return out.slice(0, 12)
-  }, [query, commands, allTabs, archivedTabs])
+  }, [query, commands, allTabs, archivedTabs, state.history])
 
   useEffect(() => setSelected(0), [query])
 
@@ -78,6 +84,7 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
     if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' ? query.trim() : undefined)
     if (row.kind === 'tab') window.openArc.switchTab(row.id)
     if (row.kind === 'archived') window.openArc.restoreTab(row.id)
+    if (row.kind === 'history') window.openArc.openTab(row.id)
     onClose()
   }
 
