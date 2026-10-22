@@ -30,6 +30,14 @@ Honest gaps: no sync, no accounts, no extensions, no downloads UI, no history se
 
 - [REA (Reverse Engineering Arc)](https://github.com/morluto/rea) was evaluated during planning as a potential shortcut for understanding Arc's UI structure. It was **not used**: Open Arc is a clean-room reimplementation built only from public sources (public screenshots, public documentation, and the publicly visible behavior of the Arc UI). No code, assets, or internal structure from Arc was taken, and no part of REA's output was incorporated.
 
+## Screenshots
+
+All captures below are genuine output of the app running under Xvfb (no mockups, no renders).
+
+| Split view (Wikipedia + Hacker News) | Auto-archive (archived tab in sidebar, live page in pane) | Command bar |
+| --- | --- | --- |
+| ![Split view](docs/screenshots/split-view.png) | ![Auto-archive](docs/screenshots/auto-archive.png) | ![Command bar](docs/screenshots/command-bar.png) |
+
 ## Verifying
 
 From a clean checkout (Node 22+, Linux/macOS/Windows):

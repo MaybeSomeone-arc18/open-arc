@@ -11,19 +11,14 @@ interface Props {
 export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element {
   const [urlDraft, setUrlDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [showAllArchived, setShowAllArchived] = useState(false)
   const [nameDraft, setNameDraft] = useState(space.name)
-
-  const activeTab = [...space.pinned, ...space.today].find((t) => t.id === space.activeTabId) ?? null
 
   const submitUrl = (): void => {
     const v = urlDraft.trim()
     if (!v) return
-    if (activeTab) {
-      // Navigate the current tab by closing over it? Arc replaces; we open fresh for PoC clarity.
-      window.openArc.openTab(v)
-    } else {
-      window.openArc.openTab(v)
-    }
+    // PoC clarity: URL bar always opens a fresh tab (Arc replaces in place).
+    window.openArc.openTab(v)
     setUrlDraft('')
   }
 
@@ -34,7 +29,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
 
   return (
     <aside className="sidebar">
-      <div className="drag-strip" />
+      <div className="drag-strip" onDoubleClick={() => window.openArc.windowControl('maximize')} />
       <div className="window-controls">
         <button className="wc close" title="Close" onClick={() => window.openArc.windowControl('close')} />
         <button className="wc minimize" title="Minimize" onClick={() => window.openArc.windowControl('minimize')} />
@@ -93,7 +88,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         {space.archived.length > 0 && (
           <>
             <div className="section-label">Archived</div>
-            {space.archived.slice(0, 5).map((tab) => (
+            {(showAllArchived ? space.archived : space.archived.slice(0, 5)).map((tab) => (
               <div key={tab.id} className="tab-row archived" title={`${tab.url} (click to restore)`} onClick={() => window.openArc.restoreTab(tab.id)}>
                 {tab.favicon ? <img className="favicon" src={tab.favicon} alt="" /> : <span className="favicon fallback">◦</span>}
                 <span className="tab-title">{tab.title || tab.url}</span>
@@ -102,7 +97,11 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
                 </span>
               </div>
             ))}
-            {space.archived.length > 5 && <div className="empty-hint">+{space.archived.length - 5} more</div>}
+            {space.archived.length > 5 && (
+              <div className="empty-hint clickable" onClick={() => setShowAllArchived((v) => !v)}>
+                {showAllArchived ? 'Show less' : `+${space.archived.length - 5} more (click to expand)`}
+              </div>
+            )}
           </>
         )}
       </div>

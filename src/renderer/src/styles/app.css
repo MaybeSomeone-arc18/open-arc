@@ -123,3 +123,6 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 .command-row.selected { background: color-mix(in srgb, var(--space-color) 26%, transparent); color: var(--text); }
 .command-row.empty { justify-content: center; font-style: italic; }
 .command-hint { font-size: 11px; color: var(--text-dim); }
+
+.empty-hint.clickable { cursor: pointer; }
+.empty-hint.clickable:hover { color: var(--text); }
