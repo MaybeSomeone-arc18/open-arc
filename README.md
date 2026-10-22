@@ -16,6 +16,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Auto-archive**: idle Today tabs move to a restorable Archive (12 h default, pinned tabs never archive)
 - **Persistence**: spaces, pins, tabs, archive and window state survive restarts (atomic JSON writes)
 - Frameless window with working minimize / maximize / close and a drag region
+- Keyboard shortcuts that act on tabs, not the shell: Ctrl+T command bar, Ctrl+L command bar, Ctrl+W close tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Alt+Left/Right history, Ctrl+S sidebar
 
 Honest gaps: no sync, no accounts, no extensions, no downloads UI, no history search, single window only. This is a PoC of the product experience, not a daily driver yet.
 

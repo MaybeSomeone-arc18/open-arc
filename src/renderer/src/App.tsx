@@ -24,6 +24,27 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('close-tab')
       }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'r') {
+        // Reload the active TAB, never the shell (default menu is removed).
+        e.preventDefault()
+        window.openArc.runCommand('reload')
+      }
+      if (mod && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        setCommandBarOpen(true)
+      }
+      if (mod && e.key === 'Tab') {
+        e.preventDefault()
+        window.openArc.runCommand(e.shiftKey ? 'prev-tab' : 'next-tab')
+      }
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault()
+        window.openArc.runCommand('go-back')
+      }
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault()
+        window.openArc.runCommand('go-forward')
+      }
       if (mod && e.key.toLowerCase() === 'd') {
         e.preventDefault()
         window.openArc.runCommand('pin-tab')

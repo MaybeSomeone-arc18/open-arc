@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -103,6 +103,10 @@ class OpenArcApp {
   }
 
   start(): void {
+    // Frameless browser shell: drop the default application menu so its
+    // accelerators (Ctrl+R = reload the SHELL, devtools, etc.) never fire.
+    // All shortcuts live in the renderer and act on the active tab instead.
+    Menu.setApplicationMenu(null)
     this.win = new BrowserWindow({
       width: 1280,
       height: 840,
@@ -259,6 +263,18 @@ class OpenArcApp {
         this.tabs.setSidebarVisible(this.state.sidebarVisible)
         this.commit()
         break
+      case 'next-tab':
+      case 'prev-tab': {
+        const list = [...space.pinned, ...space.today]
+        if (list.length < 2 || !space.activeTabId) break
+        const ix = list.findIndex((t) => t.id === space.activeTabId)
+        if (ix === -1) break
+        const next = list[(ix + (id === 'next-tab' ? 1 : -1) + list.length) % list.length]
+        space.activeTabId = next.id
+        next.lastActiveAt = Date.now()
+        this.commit()
+        break
+      }
       case 'reload':
       case 'go-back':
       case 'go-forward': {
@@ -406,6 +422,22 @@ class OpenArcApp {
     const withinOk = this.activeSpace().activeTabId === exampleTab.id
     this.switchTab(wikiTab.id)
     check('tab switching within space', withinOk)
+
+    // Keyboard shortcuts (renderer handler path): Ctrl+Tab cycles tabs, and
+    // Ctrl+R must reload the active TAB without ever reloading the shell UI
+    // (the shell-reload regression a default app menu would reintroduce).
+    await this.win.webContents.executeJavaScript('window.__shellMarker = 1')
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',ctrlKey:true,bubbles:true}))"
+    )
+    const cycled = await pollUntil(() => this.activeSpace().activeTabId === exampleTab.id, 3000)
+    check('shortcuts: Ctrl+Tab cycles tabs', cycled)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,bubbles:true}))"
+    )
+    await wait(800)
+    const marker = await this.win.webContents.executeJavaScript('window.__shellMarker')
+    check('shortcuts: Ctrl+R reloads tab, not the shell', marker === 1)
 
     // Split view on/off
     this.runCommand('split-view')
