@@ -704,6 +704,25 @@ class OpenArcApp {
     )
     check('shortcuts: Ctrl+W closes active tab', closedByKey)
 
+    // Middle-click on a sidebar tab row closes that tab
+    this.openTab('https://example.org/')
+    const auxTab = this.activeTab()!
+    await wait(500) // let the sidebar render the new row
+    const auxDispatched: boolean = await this.win.webContents.executeJavaScript(`(() => {
+      const rows = [...document.querySelectorAll('.tab-row')]
+      const row = rows[rows.length - 1]
+      if (!row) return false
+      row.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }))
+      return true
+    })()`)
+    const auxGone =
+      auxDispatched &&
+      (await pollUntil(
+        () => ![...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => t.id === auxTab.id),
+        5000
+      ))
+    check('tabs: middle-click on row closes tab', auxGone)
+
     // Failed navigations show a friendly in-page error instead of Chromium's
     this.openTab('http://127.0.0.1:9/')
     const failTab = this.activeTab()!

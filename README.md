@@ -10,7 +10,7 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 
 - Real web browsing: tabs are live `WebContentsView`s; pages load, navigate (back/forward/reload), and report titles/favicons to the sidebar
 - Vertical sidebar with **Spaces** (create, switch, rename, per-space theme color and icon)
-- **Pinned** and **Today** tab tiers per Space; pin/unpin; close; switch
+- **Pinned** and **Today** tab tiers per Space; pin/unpin; close (button or middle-click); switch
 - **Split view**: two tabs side by side (Ctrl+Shift+= to toggle, Ctrl+Shift+- to close)
 - **Command bar** (Ctrl+T): fuzzy search across commands, open tabs, archive and browsing history, URL/search entry
 - **Auto-archive**: idle Today tabs move to a restorable Archive (12 h default, pinned tabs never archive)
