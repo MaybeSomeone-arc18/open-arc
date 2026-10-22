@@ -347,9 +347,10 @@ class OpenArcApp {
         break
       }
       case 'reload':
+      case 'hard-reload':
       case 'go-back':
       case 'go-forward': {
-        const dir = id === 'go-back' ? 'back' : id === 'go-forward' ? 'forward' : 'reload'
+        const dir = id === 'go-back' ? 'back' : id === 'go-forward' ? 'forward' : id === 'hard-reload' ? 'hard-reload' : 'reload'
         if (active) this.tabs.navigate(active.id, dir)
         break
       }
@@ -652,6 +653,18 @@ class OpenArcApp {
     await wait(800)
     const marker = await this.win.webContents.executeJavaScript('window.__shellMarker')
     check('shortcuts: Ctrl+R reloads tab, not the shell', marker === 1)
+
+    // Ctrl+Shift+R hard-reloads the active tab (cache-bypassing load cycle)
+    const loadMarksBefore = this.loadingEvents.filter((e) => e.startsWith(`${exampleTab.id}:`)).length
+    this.switchTab(exampleTab.id)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'R',ctrlKey:true,shiftKey:true,bubbles:true}))"
+    )
+    const hardReloaded = await pollUntil(
+      () => this.loadingEvents.filter((e) => e.startsWith(`${exampleTab.id}:`)).length >= loadMarksBefore + 2,
+      8000
+    )
+    check('shortcuts: Ctrl+Shift+R hard reloads tab', hardReloaded)
 
     // Command bar fuzzy search (real renderer path): subsequence query 'wbr'
     // must surface the open Wikipedia tab.

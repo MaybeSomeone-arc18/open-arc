@@ -182,12 +182,13 @@ export class TabLayer {
     return this.views.get(tabId)?.webContents.isAudioMuted() ?? false
   }
 
-  navigate(tabId: string, command: 'back' | 'forward' | 'reload'): void {
+  navigate(tabId: string, command: 'back' | 'forward' | 'reload' | 'hard-reload'): void {
     const wc = this.views.get(tabId)?.webContents
     if (!wc) return
     if (command === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
     if (command === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
     if (command === 'reload') wc.reload()
+    if (command === 'hard-reload') wc.reloadIgnoringCache()
   }
 
   navigateActiveTo(tabId: string, url: string): void {

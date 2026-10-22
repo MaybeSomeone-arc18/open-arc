@@ -56,6 +56,10 @@ export function App(): JSX.Element {
         e.preventDefault()
         window.openArc.runCommand('close-tab')
       }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        window.openArc.runCommand('hard-reload')
+      }
       if (mod && !e.shiftKey && e.key.toLowerCase() === 'r') {
         // Reload the active TAB, never the shell (default menu is removed).
         e.preventDefault()
