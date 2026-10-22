@@ -81,6 +81,14 @@ export function App(): JSX.Element {
         e.preventDefault()
         applyZoom('reset')
       }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        window.openArc.copyActiveUrl().then((url) => {
+          if (!url) return
+          setZoomToast('Copied URL')
+          setTimeout(() => setZoomToast(null), 1500)
+        })
+      }
       if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         window.openArc.runCommand('goto-tab', e.key)

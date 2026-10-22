@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, session, clipboard } from 'electron'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -543,6 +543,17 @@ class OpenArcApp {
     check('shortcuts: Ctrl+9 jumps to last tab', wentLast)
     this.switchTab(wikiTab.id)
 
+    // Ctrl+Shift+C copies the active tab's URL to the real clipboard
+    this.switchTab(exampleTab.id)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'C',ctrlKey:true,shiftKey:true,bubbles:true}))"
+    )
+    const wantUrl = this.tabs.currentUrl(exampleTab.id) ?? ''
+    await wait(800) // invoke round trip + clipboard write
+    const clip = await clipboard.readText()
+    check('shortcuts: Ctrl+Shift+C copies active tab URL', clip === wantUrl && wantUrl.length > 0, `clipboard="${clip.slice(0, 60)}"`)
+    this.switchTab(wikiTab.id) // restore the precondition the Ctrl+Tab check expects
+
     // Keyboard shortcuts (renderer handler path): Ctrl+Tab cycles tabs, and
     // Ctrl+R must reload the active TAB without ever reloading the shell UI
     // (the shell-reload regression a default app menu would reintroduce).
@@ -724,6 +735,13 @@ class OpenArcApp {
     ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
       const active = this.activeTab()
       return active ? this.tabs.adjustZoom(active.id, action) : 1
+    })
+    ipcMain.handle('tab:copy-url', () => {
+      const active = this.activeTab()
+      if (!active) return null
+      const url = this.tabs.currentUrl(active.id)
+      if (url) clipboard.writeText(url)
+      return url
     })
     ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
       const active = this.activeTab()

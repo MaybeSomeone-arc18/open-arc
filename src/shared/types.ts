@@ -78,6 +78,7 @@ export interface OpenArcApi {
   findInPage(text: string, findNext?: boolean): Promise<{ matches: number; activeMatchOrdinal: number } | null>
   stopFind(): void
   zoom(action: 'in' | 'out' | 'reset'): Promise<number>
+  copyActiveUrl(): Promise<string | null>
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'close'): void
 
