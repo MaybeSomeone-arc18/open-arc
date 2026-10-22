@@ -19,6 +19,10 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 
 Honest gaps: no sync, no accounts, no extensions, no downloads UI, no history search, single window only. This is a PoC of the product experience, not a daily driver yet.
 
+### Known limitations
+
+- **Window drag is untested end-to-end.** The drag region is implemented with CSS `-webkit-app-region: drag` on the sidebar/top bar, and minimize / maximize / close are exercised in the automated verification runs, but the runs are headless (Xvfb), so pointer-dragging the window has not been verified in an automated run. It should work on a real desktop; treat it as unverified until someone drags it on a physical machine.
+
 ## Architecture
 
 ```

@@ -201,12 +201,17 @@ class OpenArcApp {
   }
 
   private switchTab(tabId: string): void {
-    const space = this.activeSpace()
-    const tab = [...space.pinned, ...space.today].find((t) => t.id === tabId)
-    if (tab) {
-      space.activeTabId = tab.id
-      tab.lastActiveAt = Date.now()
-      this.commit()
+    // Tabs are addressable across spaces (command bar lists all of them):
+    // switching to a tab in another space follows it there.
+    for (const space of this.state.spaces) {
+      const tab = [...space.pinned, ...space.today].find((t) => t.id === tabId)
+      if (tab) {
+        this.state.activeSpaceId = space.id
+        space.activeTabId = tab.id
+        tab.lastActiveAt = Date.now()
+        this.commit()
+        return
+      }
     }
   }
 
