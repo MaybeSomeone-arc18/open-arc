@@ -15,6 +15,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'next-tab', title: 'Next Tab', hint: 'Ctrl+Tab' },
   { id: 'prev-tab', title: 'Previous Tab', hint: 'Ctrl+Shift+Tab' },
   { id: 'new-space', title: 'New Space...' },
+  { id: 'move-to-space', title: 'Move Tab to Space...', hint: 'Type the space name' },
   { id: 'delete-space', title: 'Delete Current Space' },
   { id: 'pin-tab', title: 'Pin Current Tab', hint: 'Ctrl+D' },
   { id: 'unpin-tab', title: 'Unpin Current Tab' },

@@ -375,6 +375,22 @@ class OpenArcApp {
       case 'new-space':
         this.createSpace(arg?.trim() || `Space ${this.state.spaces.length + 1}`)
         break
+      case 'move-to-space': {
+        if (!active || !arg?.trim()) break
+        const target = this.state.spaces.find((sp) => sp.name.toLowerCase() === arg.trim().toLowerCase())
+        if (!target || target.id === space.id) break
+        const fromList = active.pinned ? space.pinned : space.today
+        const ix = fromList.findIndex((t) => t.id === active.id)
+        if (ix === -1) break
+        fromList.splice(ix, 1)
+        ;(active.pinned ? target.pinned : target.today).push(active)
+        if (space.activeTabId === active.id) {
+          space.activeTabId = space.today[space.today.length - 1]?.id ?? space.pinned[space.pinned.length - 1]?.id ?? null
+        }
+        if (space.splitTabId === active.id) space.splitTabId = null
+        this.commit()
+        break
+      }
       case 'delete-space': {
         if (this.state.spaces.length < 2) break // never delete the last space
         const ix = this.state.spaces.findIndex((sp) => sp.id === space.id)
@@ -943,6 +959,25 @@ class OpenArcApp {
       `today=${scratch.today.length}`
     )
     this.runCommand('delete-space')
+    this.switchTab(exampleTab.id)
+
+    // Move tab to space (command path with a space-name argument): wikiTab
+    // goes Personal -> Smoke and back; both sides of each move asserted.
+    this.switchTab(wikiTab.id)
+    this.runCommand('move-to-space', 'Smoke')
+    const movedTo = this.state.spaces.find((sp) => sp.name === 'Smoke')
+    const movedFrom = this.state.spaces.find((sp) => sp.name === 'Personal')
+    check(
+      'command: move active tab to another space',
+      !!movedTo?.today.some((t) => t.id === wikiTab.id) && !movedFrom?.today.some((t) => t.id === wikiTab.id),
+      `inSmoke=${movedTo?.today.some((t) => t.id === wikiTab.id)}`
+    )
+    this.switchTab(wikiTab.id) // cross-space follow activates Smoke
+    this.runCommand('move-to-space', 'Personal')
+    check(
+      'command: move back to Personal',
+      !!this.state.spaces.find((sp) => sp.name === 'Personal')?.today.some((t) => t.id === wikiTab.id)
+    )
     this.switchTab(exampleTab.id)
 
     // Pin

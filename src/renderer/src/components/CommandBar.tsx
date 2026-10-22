@@ -87,7 +87,7 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
 
   const run = (row: Row): void => {
     if (row.kind === 'open-url') window.openArc.openTab(query.trim())
-    if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' ? query.trim() : undefined)
+    if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' || row.id === 'move-to-space' ? query.trim() : undefined)
     if (row.kind === 'tab') window.openArc.switchTab(row.id)
     if (row.kind === 'archived') window.openArc.restoreTab(row.id)
     if (row.kind === 'history') window.openArc.openTab(row.id)
