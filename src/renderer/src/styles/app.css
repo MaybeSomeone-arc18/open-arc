@@ -188,3 +188,8 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
   width: 180px;
 }
 .find-count { font-size: 12px; opacity: 0.7; min-width: 34px; text-align: right; }
+
+/* Slim dark scrollbars for overlay lists */
+.command-rows::-webkit-scrollbar { width: 8px; }
+.command-rows::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
+.command-rows::-webkit-scrollbar-track { background: transparent; }

@@ -694,6 +694,10 @@ class OpenArcApp {
       5000
     )
     check('shortcuts: Ctrl+/ opens shortcuts overlay', overlayShown)
+    if (overlayShown) {
+      await wait(500)
+      await shot('7-shortcuts-overlay')
+    }
     await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
     )
@@ -735,7 +739,7 @@ class OpenArcApp {
     check('tabs: middle-click on row closes tab', auxGone)
 
     // Failed navigations show a friendly in-page error instead of Chromium's
-    this.openTab('http://127.0.0.1:9/')
+    this.openTab('http://127.0.0.1:48999/')
     const failTab = this.activeTab()!
     let errorShown = false
     const failWc = this.tabs.webContentsFor(failTab.id)
@@ -749,6 +753,10 @@ class OpenArcApp {
       )
     }
     check('error page: failed load shows friendly message', errorShown)
+    if (errorShown && failWc && !failWc.isDestroyed()) {
+      const errImg = await failWc.capturePage()
+      writeFileSync(`${dir}/8-error-page.png`, errImg.toPNG())
+    }
     this.closeTab(failTab.id)
 
     // Ctrl+Shift+K duplicates the active tab (same URL, becomes active)
