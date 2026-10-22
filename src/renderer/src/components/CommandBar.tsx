@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppState, CommandDef } from '../../../shared/types'
+import { fuzzyScore } from '../../../shared/fuzzy'
 
 interface Props {
   state: AppState
@@ -46,23 +47,29 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
     if (q.length > 0) {
       out.push({ kind: 'open-url', id: 'open-url', title: `Open "${query.trim()}"`, hint: 'URL or search' })
     }
-    for (const c of commands) {
-      if (!q || c.title.toLowerCase().includes(q)) {
-        out.push({ kind: 'command', id: c.id, title: c.title, hint: c.hint })
-      }
+    const best = (...texts: string[]): number | null => {
+      const scores = texts.map((t) => fuzzyScore(q, t)).filter((v): v is number => v !== null)
+      return scores.length ? Math.min(...scores) : null
     }
-    for (const t of allTabs) {
-      if (q && (t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))) {
-        out.push({ kind: 'tab', id: t.id, title: t.title || t.url, hint: t.spaceName })
-      }
-    }
-    for (const t of archivedTabs) {
-      if (q && (t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))) {
-        out.push({ kind: 'archived', id: t.id, title: t.title || t.url, hint: `${t.spaceName} · archived` })
-      }
+    const commandRows = commands
+      .map((c) => ({ row: { kind: 'command', id: c.id, title: c.title, hint: c.hint } as Row, score: q ? best(c.title) : 0 }))
+      .filter((e) => e.score !== null)
+      .sort((a, b) => a.score! - b.score!)
+    out.push(...commandRows.map((e) => e.row))
+    if (q) {
+      const tabRows = allTabs
+        .map((t) => ({ row: { kind: 'tab', id: t.id, title: t.title || t.url, hint: t.spaceName } as Row, score: best(t.title, t.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+      out.push(...tabRows.map((e) => e.row))
+      const archRows = archivedTabs
+        .map((t) => ({ row: { kind: 'archived', id: t.id, title: t.title || t.url, hint: `${t.spaceName} · archived` } as Row, score: best(t.title, t.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+      out.push(...archRows.map((e) => e.row))
     }
     return out.slice(0, 12)
-  }, [query, commands, allTabs])
+  }, [query, commands, allTabs, archivedTabs])
 
   useEffect(() => setSelected(0), [query])
 

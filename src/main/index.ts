@@ -491,6 +491,27 @@ class OpenArcApp {
     const marker = await this.win.webContents.executeJavaScript('window.__shellMarker')
     check('shortcuts: Ctrl+R reloads tab, not the shell', marker === 1)
 
+    // Command bar fuzzy search (real renderer path): subsequence query 'wbr'
+    // must surface the open Wikipedia tab.
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
+    )
+    await wait(700)
+    await this.win.webContents.executeJavaScript(
+      "const i=document.querySelector('.command-input');" +
+        "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(i,'wbr');" +
+        "i.dispatchEvent(new Event('input',{bubbles:true}))"
+    )
+    await wait(400)
+    const rowTexts: string = await this.win.webContents.executeJavaScript(
+      "[...document.querySelectorAll('.command-row')].map(r=>r.textContent).join('|')"
+    )
+    check('command bar: fuzzy subsequence finds tab', /Wikipedia/i.test(rowTexts), rowTexts.slice(0, 80))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+
     // Split view on/off
     this.runCommand('split-view')
     const splitOn = this.activeSpace().splitTabId !== null
