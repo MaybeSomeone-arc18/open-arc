@@ -60,7 +60,8 @@ function defaultState(): AppState {
     activeSpaceId: space.id,
     sidebarVisible: true,
     archiveAfterMs: Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000,
-    recentlyClosed: []
+    recentlyClosed: [],
+    windowBounds: null
   }
 }
 
@@ -68,6 +69,7 @@ function defaultState(): AppState {
 function migrate(state: AppState): AppState {
   state.archiveAfterMs = Number(process.env.OPEN_ARC_ARCHIVE_MS) || state.archiveAfterMs || 12 * 60 * 60 * 1000
   state.recentlyClosed = state.recentlyClosed ?? []
+  state.windowBounds = state.windowBounds ?? null
   for (const s of state.spaces) {
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
@@ -111,9 +113,11 @@ class OpenArcApp {
     // accelerators (Ctrl+R = reload the SHELL, devtools, etc.) never fire.
     // All shortcuts live in the renderer and act on the active tab instead.
     Menu.setApplicationMenu(null)
+    const saved = this.state.windowBounds
     this.win = new BrowserWindow({
-      width: 1280,
-      height: 840,
+      width: saved?.width ?? 1280,
+      height: saved?.height ?? 840,
+      ...(saved ? { x: saved.x, y: saved.y } : {}),
       minWidth: 720,
       minHeight: 480,
       frame: false,
@@ -123,6 +127,15 @@ class OpenArcApp {
         sandbox: false
       }
     })
+    // Persist window bounds (normal state only) for next launch.
+    const saveBounds = (): void => {
+      if (this.win.isDestroyed() || this.win.isMaximized() || this.win.isMinimized() || this.win.isFullScreen()) return
+      this.state.windowBounds = this.win.getBounds()
+      this.store.save(this.state)
+    }
+    this.win.on('resize', saveBounds)
+    this.win.on('move', saveBounds)
+
     this.tabs = new TabLayer(
       this.win,
       () => this.commit(),
@@ -389,6 +402,12 @@ class OpenArcApp {
       check('persist: spaces survive restart', !!personal && !!smoke, `${this.state.spaces.length} spaces loaded`)
       check('persist: pinned tab survives restart', !!personal?.pinned.find((t) => t.url.includes('example.com')))
       check('persist: archived tab survives restart', !!personal?.archived.find((t) => t.url.includes('wikipedia.org')))
+      const b = this.win.getBounds()
+      check(
+        'persist: window bounds restored',
+        this.state.windowBounds?.width === 1000 && this.state.windowBounds?.height === 700 && b.width === 1000 && b.height === 700,
+        `saved=${JSON.stringify(this.state.windowBounds)} live=${b.width}x${b.height}`
+      )
       await shot('6-relaunch-restored')
       writeFileSync(`${dir}/report-verify.json`, JSON.stringify({ phase: 'verify', checks }, null, 2))
       app.exit(checks.every((c) => c.pass) ? 0 : 1)
@@ -509,6 +528,11 @@ class OpenArcApp {
     await wait(500)
     check('auto-archive: idle tab moves to archive', moved >= 1 && this.activeSpace().archived.some((t) => t.id === wiki2!.id))
     await shot('5-auto-archive')
+
+    // Window bounds persistence: set a distinctive size; the verify phase
+    // asserts both the saved state and the restored live window.
+    this.win.setSize(1000, 700)
+    this.state.windowBounds = this.win.getBounds()
 
     this.store.flush(this.state)
     writeFileSync(`${dir}/report-run.json`, JSON.stringify({ phase: 'run', checks }, null, 2))

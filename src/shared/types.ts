@@ -44,6 +44,8 @@ export interface AppState {
   archiveAfterMs: number
   /** Recently closed tabs (most recent first, capped), for Ctrl+Shift+T. */
   recentlyClosed: ClosedTab[]
+  /** Last non-maximized window bounds, restored on launch. */
+  windowBounds: { x: number; y: number; width: number; height: number } | null
 }
 
 export interface CommandDef {
