@@ -143,3 +143,15 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
   font-size: 13px;
   pointer-events: none;
 }
+
+.ghost-btn.danger { color: #d0607e; }
+.space-dot-input {
+  background: var(--bg-hover);
+  border: 1px solid var(--space-color);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 84px;
+  outline: none;
+}

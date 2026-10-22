@@ -327,6 +327,16 @@ class OpenArcApp {
       case 'new-space':
         this.createSpace(arg?.trim() || `Space ${this.state.spaces.length + 1}`)
         break
+      case 'delete-space': {
+        if (this.state.spaces.length < 2) break // never delete the last space
+        const ix = this.state.spaces.findIndex((sp) => sp.id === space.id)
+        for (const t of [...space.pinned, ...space.today]) this.tabs.close(t.id)
+        this.state.spaces.splice(ix, 1)
+        const next = this.state.spaces[Math.max(0, ix - 1)]
+        this.state.activeSpaceId = next.id
+        this.commit()
+        break
+      }
       case 'reopen-closed-tab': {
         const entry = this.state.recentlyClosed.shift()
         if (!entry) break
@@ -542,6 +552,19 @@ class OpenArcApp {
     check('spaces: create + activate', this.state.spaces.length === before + 1 && this.activeSpace().name === 'Smoke')
     this.switchTab(exampleTab.id)
     check('spaces: cross-space tab switch follows tab', this.activeSpace().name === 'Personal' && this.activeSpace().activeTabId === exampleTab.id)
+
+    // Space deletion: throwaway space with a tab must vanish, views closed
+    this.createSpace('Temp')
+    this.openTab('https://example.org/')
+    const tempSpaceId = this.activeSpace().id
+    const tempSpaceTabId = this.activeTab()!.id
+    const spaceCount = this.state.spaces.length
+    this.runCommand('delete-space')
+    check(
+      'spaces: delete removes space and its tabs',
+      this.state.spaces.length === spaceCount - 1 && !this.state.spaces.some((sp) => sp.id === tempSpaceId) && this.tabs.currentUrl(tempSpaceTabId) === null
+    )
+    this.switchTab(exampleTab.id) // restore focus for later checks
 
     // Pin
     this.setPinned(exampleTab.id, true)

@@ -13,6 +13,9 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
   const [urlDraft, setUrlDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [showAllArchived, setShowAllArchived] = useState(false)
+  const [addingSpace, setAddingSpace] = useState(false)
+  const [spaceDraft, setSpaceDraft] = useState('')
+  const [armingDelete, setArmingDelete] = useState(false)
   const [nameDraft, setNameDraft] = useState(space.name)
 
   const submitUrl = (): void => {
@@ -63,6 +66,23 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
           />
         ) : (
           <span className="space-title">{space.name}</span>
+        )}
+        {state.spaces.length > 1 && (
+          <button
+            className={`ghost-btn ${armingDelete ? 'danger' : ''}`}
+            title={armingDelete ? `Click again to delete "${space.name}" and its tabs` : 'Delete this Space'}
+            onClick={() => {
+              if (armingDelete) {
+                window.openArc.runCommand('delete-space')
+                setArmingDelete(false)
+              } else {
+                setArmingDelete(true)
+                setTimeout(() => setArmingDelete(false), 3000)
+              }
+            }}
+          >
+            ×
+          </button>
         )}
         <button className="ghost-btn" title="Hide sidebar (Ctrl+S)" onClick={() => window.openArc.toggleSidebar()}>«</button>
       </div>
@@ -119,16 +139,28 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
             {s.icon}
           </button>
         ))}
-        <button
-          className="space-dot add"
-          title="New Space"
-          onClick={() => {
-            const name = window.prompt('Name this Space')
-            if (name) window.openArc.createSpace(name)
-          }}
-        >
-          ＋
-        </button>
+        {addingSpace ? (
+          <input
+            className="space-dot-input"
+            autoFocus
+            placeholder="Space name"
+            value={spaceDraft}
+            onChange={(e) => setSpaceDraft(e.target.value)}
+            onBlur={() => { setAddingSpace(false); setSpaceDraft('') }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && spaceDraft.trim()) {
+                window.openArc.createSpace(spaceDraft.trim())
+                setSpaceDraft('')
+                setAddingSpace(false)
+              }
+              if (e.key === 'Escape') { setAddingSpace(false); setSpaceDraft('') }
+            }}
+          />
+        ) : (
+          <button className="space-dot add" title="New Space" onClick={() => setAddingSpace(true)}>
+            ＋
+          </button>
+        )}
       </div>
     </aside>
   )
