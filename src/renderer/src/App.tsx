@@ -81,6 +81,10 @@ export function App(): JSX.Element {
         e.preventDefault()
         applyZoom('reset')
       }
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
+        e.preventDefault()
+        window.openArc.runCommand('goto-tab', e.key)
+      }
       if (mod && e.key === 'Tab') {
         e.preventDefault()
         window.openArc.runCommand(e.shiftKey ? 'prev-tab' : 'next-tab')

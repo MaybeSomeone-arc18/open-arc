@@ -305,6 +305,18 @@ class OpenArcApp {
         this.tabs.setSidebarVisible(this.state.sidebarVisible)
         this.commit()
         break
+      case 'goto-tab': {
+        // Chrome-style: Ctrl+1..8 jumps to that tab (pinned first), Ctrl+9 to the last.
+        const list = [...space.pinned, ...space.today]
+        if (!arg || list.length === 0) break
+        const n = parseInt(arg, 10)
+        const target = n === 9 ? list[list.length - 1] : list[n - 1]
+        if (!target || target.id === space.activeTabId) break
+        space.activeTabId = target.id
+        target.lastActiveAt = Date.now()
+        this.commit()
+        break
+      }
       case 'next-tab':
       case 'prev-tab': {
         const list = [...space.pinned, ...space.today]
@@ -516,6 +528,20 @@ class OpenArcApp {
     const withinOk = this.activeSpace().activeTabId === exampleTab.id
     this.switchTab(wikiTab.id)
     check('tab switching within space', withinOk)
+
+    // Ctrl+1 jumps to the first tab, Ctrl+9 to the last (real key path)
+    const listNow = [...this.activeSpace().pinned, ...this.activeSpace().today]
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'1',ctrlKey:true,bubbles:true}))"
+    )
+    const wentFirst = await pollUntil(() => this.activeSpace().activeTabId === listNow[0].id, 5000)
+    check('shortcuts: Ctrl+1 jumps to first tab', wentFirst)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'9',ctrlKey:true,bubbles:true}))"
+    )
+    const wentLast = await pollUntil(() => this.activeSpace().activeTabId === listNow[listNow.length - 1].id, 5000)
+    check('shortcuts: Ctrl+9 jumps to last tab', wentLast)
+    this.switchTab(wikiTab.id)
 
     // Keyboard shortcuts (renderer handler path): Ctrl+Tab cycles tabs, and
     // Ctrl+R must reload the active TAB without ever reloading the shell UI
