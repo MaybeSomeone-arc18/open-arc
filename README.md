@@ -33,7 +33,9 @@ Honest gaps: no sync, no accounts, no extensions, no download manager UI (files 
 
 ## Screenshots
 
-All captures below are genuine output of the app running under Xvfb (no mockups, no renders).
+All captures below are genuine output of the app running under Xvfb (no mockups, no renders). The demo GIF is assembled from real app captures (shell + tab panes composited at their true layout positions) because screen recording under a headless X server lags; every pixel comes from the running app.
+
+![Open Arc demo: command bar, tabs, split view, auto-archive](docs/screenshots/demo.gif)
 
 | Split view (Wikipedia + Hacker News) | Auto-archive (archived tab in sidebar, live page in pane) | Command bar |
 | --- | --- | --- |
