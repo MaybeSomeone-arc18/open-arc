@@ -542,6 +542,14 @@ class OpenArcApp {
         check('persist: zoom applied to restored tab view', zoomLive, `factor=${this.tabs.getZoom(pinnedExample.id)}`)
       }
       check('persist: archived tab survives restart', !!personal?.archived.find((t) => t.url.includes('wikipedia.org')))
+      // The run phase deliberately clears history near the end (clear-history
+      // check); the post-clear navigations prove the field itself persists.
+      check(
+        'persist: history survives restart',
+        this.state.history.length >= 1 && this.state.history.every((h) => typeof h.url === 'string' && h.url.length > 0),
+        `${this.state.history.length} entries`
+      )
+      check('persist: recently closed survives restart', this.state.recentlyClosed.length > 0, `${this.state.recentlyClosed.length} entries`)
       const b = this.win.getBounds()
       check(
         'persist: window bounds restored',
