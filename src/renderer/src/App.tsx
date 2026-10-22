@@ -92,6 +92,10 @@ export function App(): JSX.Element {
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
+      if (e.key === 'F12' || (mod && e.shiftKey && e.key.toLowerCase() === 'i')) {
+        e.preventDefault()
+        window.openArc.toggleDevTools()
+      }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         window.openArc.runCommand('duplicate-tab')

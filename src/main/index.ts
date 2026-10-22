@@ -666,6 +666,18 @@ class OpenArcApp {
     )
     check('shortcuts: Ctrl+Shift+R hard reloads tab', hardReloaded)
 
+    // F12 toggles DevTools for the active tab (state asserted both ways)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'F12',bubbles:true}))"
+    )
+    const dtOpened = await pollUntil(() => this.tabs.isDevToolsOpen(exampleTab.id), 5000)
+    check('shortcuts: F12 opens tab DevTools', dtOpened)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'F12',bubbles:true}))"
+    )
+    const dtClosed = await pollUntil(() => !this.tabs.isDevToolsOpen(exampleTab.id), 5000)
+    check('shortcuts: F12 again closes DevTools', dtClosed)
+
     // Command bar fuzzy search (real renderer path): subsequence query 'wbr'
     // must surface the open Wikipedia tab.
     await this.win.webContents.executeJavaScript(
@@ -888,6 +900,10 @@ class OpenArcApp {
     ipcMain.handle('tab:mute-toggle', () => {
       const active = this.activeTab()
       return active ? this.tabs.toggleMute(active.id) : false
+    })
+    ipcMain.handle('tab:devtools', () => {
+      const active = this.activeTab()
+      return active ? this.tabs.toggleDevTools(active.id) : false
     })
     ipcMain.handle('tab:copy-url', () => {
       const active = this.activeTab()

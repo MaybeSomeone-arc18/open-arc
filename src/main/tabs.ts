@@ -178,6 +178,18 @@ export class TabLayer {
     return next
   }
 
+  toggleDevTools(tabId: string): boolean {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return false
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    else wc.openDevTools({ mode: 'detach' })
+    return wc.isDevToolsOpened()
+  }
+
+  isDevToolsOpen(tabId: string): boolean {
+    return this.views.get(tabId)?.webContents.isDevToolsOpened() ?? false
+  }
+
   isMuted(tabId: string): boolean {
     return this.views.get(tabId)?.webContents.isAudioMuted() ?? false
   }
