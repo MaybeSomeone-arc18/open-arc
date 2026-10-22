@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, session } from 'electron'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -87,6 +87,7 @@ class OpenArcApp {
   private state: AppState
   /** Load start/stop markers, used by the smoke suite (and handy in dev logs). */
   private loadingEvents: string[] = []
+  private downloadsDone: { filename: string; path: string; state: string }[] = []
 
   constructor() {
     this.state = migrate(this.store.load() ?? defaultState())
@@ -127,6 +128,18 @@ class OpenArcApp {
         sandbox: false
       }
     })
+    // Downloads: save into the system Downloads folder, toast on completion.
+    this.downloadsDone = []
+    session.defaultSession.on('will-download', (_e, item) => {
+      const savePath = join(app.getPath('downloads'), item.getFilename())
+      item.setSavePath(savePath)
+      item.once('done', (_ev, st) => {
+        const info = { filename: item.getFilename(), path: savePath, state: st }
+        this.downloadsDone.push(info)
+        if (!this.win.isDestroyed()) this.win.webContents.send('download:done', info)
+      })
+    })
+
     // Persist window bounds (normal state only) for next launch.
     const saveBounds = (): void => {
       if (this.win.isDestroyed() || this.win.isMaximized() || this.win.isMinimized() || this.win.isFullScreen()) return
@@ -561,6 +574,29 @@ class OpenArcApp {
     this.restoreTab(tempTab.id)
     check('restore archived tab', wasArchived && this.activeSpace().today.some((t) => t.id === tempTab.id))
     this.closeTab(tempTab.id) // keep the final state tidy for the verify phase
+
+    // Downloads: local server returns Content-Disposition: attachment; the
+    // will-download handler must save the file into ~/Downloads.
+    const { createServer } = await import('node:http')
+    const dlServer = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Disposition': 'attachment; filename="open-arc-smoke.txt"' })
+      res.end('open-arc smoke download\n')
+    })
+    await new Promise<void>((r) => dlServer.listen(0, '127.0.0.1', r))
+    const dlPort = (dlServer.address() as { port: number }).port
+    this.openTab(`http://127.0.0.1:${dlPort}/file`)
+    const dlTab = this.activeTab()!
+    const gotDl = await pollUntil(() => this.downloadsDone.some((d) => d.filename === 'open-arc-smoke.txt' && d.state === 'completed'), 10000)
+    let dlOnDisk = false
+    try {
+      const { existsSync, readFileSync, unlinkSync } = await import('node:fs')
+      const p = join(app.getPath('downloads'), 'open-arc-smoke.txt')
+      dlOnDisk = existsSync(p) && readFileSync(p, 'utf8').includes('open-arc smoke download')
+      if (dlOnDisk) unlinkSync(p)
+    } catch { /* reported by check below */ }
+    check('downloads: file saves to Downloads folder', gotDl && dlOnDisk)
+    this.closeTab(dlTab.id)
+    dlServer.close()
 
     // Window bounds persistence: set a distinctive size; the verify phase
     // asserts both the saved state and the restored live window.

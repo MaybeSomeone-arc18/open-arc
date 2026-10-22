@@ -7,10 +7,19 @@ export function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null)
   const [commandBarOpen, setCommandBarOpen] = useState(false)
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set())
+  const [downloadToast, setDownloadToast] = useState<string | null>(null)
 
   useEffect(() => {
     window.openArc.getState().then(setState)
     const off = window.openArc.onStateChanged(setState)
+    let toastTimer: ReturnType<typeof setTimeout> | null = null
+    const offDownload = window.openArc.onDownloadDone((info) => {
+      setDownloadToast(
+        info.state === 'completed' ? `Downloaded ${info.filename}` : `Download ${info.state}: ${info.filename}`
+      )
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => setDownloadToast(null), 6000)
+    })
     const offLoading = window.openArc.onTabLoading((tabId, loading) => {
       setLoadingTabs((prev) => {
         const next = new Set(prev)
@@ -75,6 +84,8 @@ export function App(): JSX.Element {
     return () => {
       off()
       offLoading()
+      offDownload()
+      if (toastTimer) clearTimeout(toastTimer)
       window.removeEventListener('keydown', onKey)
     }
   }, [])
@@ -88,6 +99,7 @@ export function App(): JSX.Element {
     <div className="app" style={{ ['--space-color' as string]: space.color }}>
       {state.sidebarVisible && <Sidebar state={state} space={space} loadingTabs={loadingTabs} onOpenCommandBar={() => setCommandBarOpen(true)} />}
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
+      {downloadToast && <div className="download-toast">{downloadToast}</div>}
       {!state.sidebarVisible && (
         <button className="sidebar-reopen" title="Show sidebar (Ctrl+S)" onClick={() => window.openArc.toggleSidebar()}>
           »

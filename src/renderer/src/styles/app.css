@@ -129,3 +129,17 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 
 @keyframes oa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .favicon.loading { display: inline-block; animation: oa-spin 1s linear infinite; color: var(--space-color); }
+
+.download-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  background: color-mix(in srgb, var(--space-color) 30%, #1d1c24);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--space-color) 60%, transparent);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  pointer-events: none;
+}

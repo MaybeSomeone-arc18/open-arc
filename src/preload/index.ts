@@ -13,6 +13,11 @@ const api: OpenArcApi = {
     ipcRenderer.on('tab:loading', listener)
     return () => ipcRenderer.removeListener('tab:loading', listener)
   },
+  onDownloadDone: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, info: { filename: string; path: string; state: string }): void => cb(info)
+    ipcRenderer.on('download:done', listener)
+    return () => ipcRenderer.removeListener('download:done', listener)
+  },
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),
