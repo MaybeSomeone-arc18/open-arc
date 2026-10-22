@@ -726,6 +726,30 @@ class OpenArcApp {
     if (popTab) this.closeTab(popTab.id)
     this.switchTab(exampleTab.id)
 
+    // Command registry: the three shortcut-only commands are discoverable
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
+    )
+    let regBarUp = false
+    for (let i = 0; i < 20 && !regBarUp; i++) {
+      regBarUp = await this.win.webContents.executeJavaScript("!!document.querySelector('.command-input')")
+      if (!regBarUp) await wait(250)
+    }
+    const regSet: string = await this.win.webContents.executeJavaScript(
+      "(()=>{const i=document.querySelector('.command-input'); if(!i) return 'NO-INPUT';" +
+        "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(i,'uplicate');" +
+        "i.dispatchEvent(new Event('input',{bubbles:true})); return 'OK'})()"
+    )
+    await wait(400)
+    const regRows: string = await this.win.webContents.executeJavaScript(
+      "[...document.querySelectorAll('.command-row')].map(r=>r.textContent).join('|')"
+    )
+    check('command bar: registry lists Duplicate Tab', regBarUp && regSet === 'OK' && /Duplicate Tab/.test(regRows), regRows.slice(0, 80))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+
     // Context menu builder: link items fire their real handlers (the native
     // popup itself is not assertable headless - see README).
     const ctxWc = this.tabs.webContentsFor(exampleTab.id)!
