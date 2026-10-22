@@ -78,6 +78,14 @@ export class TabLayer {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
     })
+    // Navigation resets zoom to the origin default, so a stored factor must
+    // be (re)applied after the page finishes loading.
+    if (tab.zoom && tab.zoom !== 1) {
+      view.webContents.on('did-stop-loading', () => {
+        const z = tab.zoom
+        if (z && z !== 1 && !view.webContents.isDestroyed()) view.webContents.setZoomFactor(z)
+      })
+    }
     view.webContents.loadURL(tab.url)
     return view
   }

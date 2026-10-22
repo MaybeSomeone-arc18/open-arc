@@ -462,7 +462,14 @@ class OpenArcApp {
       const personal = this.state.spaces.find((s) => s.name === 'Personal')
       const smoke = this.state.spaces.find((s) => s.name === 'Smoke')
       check('persist: spaces survive restart', !!personal && !!smoke, `${this.state.spaces.length} spaces loaded`)
-      check('persist: pinned tab survives restart', !!personal?.pinned.find((t) => t.url.includes('example.com')))
+      const pinnedExample = personal?.pinned.find((t) => t.url.includes('example.com'))
+      check('persist: pinned tab survives restart', !!pinnedExample)
+      if (pinnedExample) {
+        check('persist: zoom setting survives restart', pinnedExample.zoom === 1.25, `zoom=${pinnedExample.zoom}`)
+        this.switchTab(pinnedExample.id)
+        const zoomLive = await pollUntil(() => Math.abs(this.tabs.getZoom(pinnedExample.id) - 1.25) < 0.001, 5000)
+        check('persist: zoom applied to restored tab view', zoomLive, `factor=${this.tabs.getZoom(pinnedExample.id)}`)
+      }
       check('persist: archived tab survives restart', !!personal?.archived.find((t) => t.url.includes('wikipedia.org')))
       const b = this.win.getBounds()
       check(
@@ -530,6 +537,8 @@ class OpenArcApp {
     )
     const zoomReset = await pollUntil(() => Math.abs(this.tabs.getZoom(exampleTab.id) - 1) < 0.001, 5000)
     check('zoom: Ctrl+0 resets to 100%', zoomReset, `factor=${this.tabs.getZoom(exampleTab.id)}`)
+    // Leave a persisted 125% marker on the pinned example tab for the verify phase
+    exampleTab.zoom = 1.25
 
     // Find-in-page is NOT smoke-checked here: in this container the
     // found-in-page event never dispatches to an app's WebContentsView
@@ -832,7 +841,11 @@ class OpenArcApp {
     })
     ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
       const active = this.activeTab()
-      return active ? this.tabs.adjustZoom(active.id, action) : 1
+      if (!active) return 1
+      const factor = this.tabs.adjustZoom(active.id, action)
+      active.zoom = factor // persisted; restored when the view is (re)created
+      this.store.save(this.state)
+      return factor
     })
     ipcMain.handle('tab:mute-toggle', () => {
       const active = this.activeTab()

@@ -9,6 +9,8 @@ export interface TabItem {
   pinned: boolean
   /** Last time the tab was focused (epoch ms); drives auto-archive. */
   lastActiveAt: number
+  /** Per-tab zoom factor (1 = 100%); restored when the tab's view is created. */
+  zoom?: number
 }
 
 export interface Space {
