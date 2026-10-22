@@ -59,13 +59,15 @@ function defaultState(): AppState {
     spaces: [space],
     activeSpaceId: space.id,
     sidebarVisible: true,
-    archiveAfterMs: Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000
+    archiveAfterMs: Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000,
+    recentlyClosed: []
   }
 }
 
 /** Fill fields added after a state file was written (forward-compatible loads). */
 function migrate(state: AppState): AppState {
   state.archiveAfterMs = Number(process.env.OPEN_ARC_ARCHIVE_MS) || state.archiveAfterMs || 12 * 60 * 60 * 1000
+  state.recentlyClosed = state.recentlyClosed ?? []
   for (const s of state.spaces) {
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
@@ -191,6 +193,11 @@ class OpenArcApp {
       const inToday = space.today.findIndex((t) => t.id === tabId)
       const inArchived = space.archived.findIndex((t) => t.id === tabId)
       if (inPinned === -1 && inToday === -1 && inArchived === -1) continue
+      if (inPinned !== -1 || inToday !== -1) {
+        const tab = inPinned !== -1 ? space.pinned[inPinned] : space.today[inToday]
+        this.state.recentlyClosed.unshift({ url: tab.url, title: tab.title, spaceId: space.id, pinned: tab.pinned, closedAt: Date.now() })
+        this.state.recentlyClosed = this.state.recentlyClosed.slice(0, 20)
+      }
       if (inPinned !== -1) space.pinned.splice(inPinned, 1)
       if (inToday !== -1) space.today.splice(inToday, 1)
       if (inArchived !== -1) space.archived.splice(inArchived, 1)
@@ -294,6 +301,19 @@ class OpenArcApp {
       case 'new-space':
         this.createSpace(arg?.trim() || `Space ${this.state.spaces.length + 1}`)
         break
+      case 'reopen-closed-tab': {
+        const entry = this.state.recentlyClosed.shift()
+        if (!entry) break
+        const target = this.state.spaces.find((sp) => sp.id === entry.spaceId) ?? this.activeSpace()
+        const tab = makeTab(entry.url, entry.pinned)
+        tab.title = entry.title
+        ;(entry.pinned ? target.pinned : target.today).push(tab)
+        this.state.activeSpaceId = target.id
+        target.activeTabId = tab.id
+        tab.lastActiveAt = Date.now()
+        this.commit()
+        break
+      }
       case 'pin-tab':
         if (active && !active.pinned) this.setPinned(active.id, true)
         break
@@ -474,11 +494,20 @@ class OpenArcApp {
     this.setPinned(exampleTab.id, true)
     check('pin tab', this.activeSpace().pinned.some((t) => t.id === exampleTab.id))
 
+    // Reopen closed tab (Ctrl+Shift+T path): close the wiki tab, reopen by URL
+    const wikiUrl = wikiTab.url
+    this.closeTab(wikiTab.id)
+    const closedOk = !this.activeSpace().today.some((t) => t.id === wikiTab.id) && this.state.recentlyClosed.length > 0
+    this.runCommand('reopen-closed-tab')
+    const wiki2 = this.activeSpace().today.find((t) => t.url === wikiUrl)
+    check('reopen closed tab', closedOk && !!wiki2)
+    this.switchTab(exampleTab.id) // restore focus: the archiver skips the active tab
+
     // Auto-archive: idle the wiki tab beyond the threshold, then tick
-    wikiTab.lastActiveAt = Date.now() - this.state.archiveAfterMs - 1000
+    wiki2!.lastActiveAt = Date.now() - this.state.archiveAfterMs - 1000
     const moved = this.archiveIdle(false)
     await wait(500)
-    check('auto-archive: idle tab moves to archive', moved >= 1 && this.activeSpace().archived.some((t) => t.id === wikiTab.id))
+    check('auto-archive: idle tab moves to archive', moved >= 1 && this.activeSpace().archived.some((t) => t.id === wiki2!.id))
     await shot('5-auto-archive')
 
     this.store.flush(this.state)

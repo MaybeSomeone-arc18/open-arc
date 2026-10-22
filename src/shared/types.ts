@@ -28,12 +28,22 @@ export interface Space {
   splitTabId: string | null
 }
 
+export interface ClosedTab {
+  url: string
+  title: string
+  spaceId: string
+  pinned: boolean
+  closedAt: number
+}
+
 export interface AppState {
   spaces: Space[]
   activeSpaceId: string
   sidebarVisible: boolean
   /** Idle threshold (ms) after which unpinned tabs auto-archive. */
   archiveAfterMs: number
+  /** Recently closed tabs (most recent first, capped), for Ctrl+Shift+T. */
+  recentlyClosed: ClosedTab[]
 }
 
 export interface CommandDef {

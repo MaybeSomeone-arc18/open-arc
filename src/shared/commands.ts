@@ -4,6 +4,7 @@ import type { CommandDef } from './types'
 export const COMMANDS: CommandDef[] = [
   { id: 'new-tab', title: 'New Tab', hint: 'Ctrl+T then type a URL' },
   { id: 'close-tab', title: 'Close Current Tab', hint: 'Ctrl+W' },
+  { id: 'reopen-closed-tab', title: 'Reopen Closed Tab', hint: 'Ctrl+Shift+T' },
   { id: 'toggle-sidebar', title: 'Show / Hide Sidebar', hint: 'Ctrl+S' },
   { id: 'reload', title: 'Reload Page', hint: 'Ctrl+R' },
   { id: 'go-back', title: 'Go Back in History', hint: 'Alt+\u2190' },

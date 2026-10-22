@@ -21,7 +21,10 @@ export function App(): JSX.Element {
     })
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key.toLowerCase() === 't') {
+      if (mod && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        window.openArc.runCommand('reopen-closed-tab')
+      } else if (mod && e.key.toLowerCase() === 't') {
         e.preventDefault()
         setCommandBarOpen((v) => !v)
       }
