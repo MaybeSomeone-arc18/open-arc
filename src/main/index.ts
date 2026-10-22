@@ -401,6 +401,10 @@ class OpenArcApp {
       case 'archive-now':
         this.archiveIdle(true)
         break
+      case 'clear-history':
+        this.state.history = []
+        this.commit()
+        break
       case 'clear-today':
         for (const t of [...space.today]) this.tabs.close(t.id)
         space.today = []
@@ -676,6 +680,10 @@ class OpenArcApp {
       histBarUp && histSet === 'OK' && /history/i.test(histRowTexts),
       `barUp=${histBarUp} set=${histSet} rows=${histRowTexts.slice(0, 80)}`
     )
+
+    // Clear History command empties the record
+    this.runCommand('clear-history')
+    check('command: clear-history empties history', this.state.history.length === 0, `n=${this.state.history.length}`)
     await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
     )
