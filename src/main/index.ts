@@ -836,6 +836,34 @@ class OpenArcApp {
     check('restore archived tab', wasArchived && this.activeSpace().today.some((t) => t.id === tempTab.id))
     this.closeTab(tempTab.id) // keep the final state tidy for the verify phase
 
+    // Command bar surfaces recently closed tabs (tempTab's close made an entry)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
+    )
+    let closedBarUp = false
+    for (let i = 0; i < 20 && !closedBarUp; i++) {
+      closedBarUp = await this.win.webContents.executeJavaScript("!!document.querySelector('.command-input')")
+      if (!closedBarUp) await wait(250)
+    }
+    const closedSet: string = await this.win.webContents.executeJavaScript(
+      "(()=>{const i=document.querySelector('.command-input'); if(!i) return 'NO-INPUT';" +
+        "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(i,'xmpl.org');" +
+        "i.dispatchEvent(new Event('input',{bubbles:true})); return 'OK'})()"
+    )
+    await wait(400)
+    const closedRowTexts: string = await this.win.webContents.executeJavaScript(
+      "[...document.querySelectorAll('.command-row')].map(r=>r.textContent).join('|')"
+    )
+    check(
+      'command bar: recently closed tabs surface',
+      closedBarUp && closedSet === 'OK' && /recently closed/i.test(closedRowTexts),
+      `barUp=${closedBarUp} set=${closedSet} rows=${closedRowTexts.slice(0, 80)}`
+    )
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+
     // Downloads: local server returns Content-Disposition: attachment; the
     // will-download handler must save the file into ~/Downloads.
     const { createServer } = await import('node:http')
