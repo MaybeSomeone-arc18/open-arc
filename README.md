@@ -17,7 +17,11 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 - **Persistence**: spaces, pins, tabs, archive and window state survive restarts (atomic JSON writes)
 - Frameless window with working minimize / maximize / close and a drag region
 - **Downloads**: files save to the system Downloads folder with a completion toast
-- Keyboard shortcuts that act on tabs, not the shell: Ctrl+T command bar, Ctrl+L command bar, Ctrl+W close tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Alt+Left/Right history, Ctrl+S sidebar
+- **Find-in-page** (Ctrl+F) with live match count and Enter / Shift+Enter navigation
+- **Per-tab zoom**: Ctrl+= / Ctrl+- / Ctrl+0 (50%-300%), with a zoom-level toast
+- **Copy active URL**: Ctrl+Shift+C writes the tab's live URL to the clipboard
+- **Mute tab**: Ctrl+M toggles the active tab's audio
+- Keyboard shortcuts that act on tabs, not the shell: Ctrl+T / Ctrl+L command bar, Ctrl+W close tab, Ctrl+Shift+T reopen closed tab, Ctrl+D pin, Ctrl+R reload tab, Ctrl+F find, Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, Ctrl+1..8 jump to tab, Ctrl+9 last tab, Alt+Left/Right history, Ctrl+S sidebar
 
 Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no history search, single window only. This is a PoC of the product experience, not a daily driver yet.
 
@@ -55,12 +59,12 @@ npm run shot        # smoke suite: launches the real app twice and checks it
 
 `npm run shot` (`scripts/screenshot.mjs`) runs the production build against a fresh temporary profile, twice:
 
-- **Run phase** - window controls execute, command bar opens on Ctrl+T, example.com loads with its real title, in-tab forward/back navigation, tab switching within a space, split view on/off, space creation, cross-space tab switching, pinning, auto-archive of an idle tab. Genuine screenshots land in `shots/` alongside `report-run.json`.
+- **Run phase** - window controls execute, command bar opens on Ctrl+T (with fuzzy-search matching), example.com loads with its real title, loading start/stop events fire, per-tab zoom in and reset via real keydowns, in-tab forward/back navigation, tab switching within a space, Ctrl+1 / Ctrl+9 tab jumps, copy-URL to the real clipboard, tab mute/unmute, Ctrl+Tab cycling, Ctrl+R reloading the tab (never the shell), split view on/off, space creation, cross-space tab switching, pinning, reopen-closed-tab, auto-archive of an idle tab with restore, a real download landing in the Downloads folder, and space deletion. Genuine screenshots land in `shots/` alongside `report-run.json`.
 - **Verify phase** - relaunches on the same profile and checks that spaces, pinned tabs and the archive survived the restart (`report-verify.json`).
 
 The suite exits non-zero if any check fails. On headless Linux it wraps itself in `xvfb-run`. It needs network access - the navigation checks load example.com, example.org and wikipedia.org for real.
 
-What the suite does **not** cover: pointer-driven window dragging, minimize/maximize state reflection (needs a real window manager), downloads, extensions, multi-window, and any manual UI interaction.
+What the suite does **not** cover: find-in-page (the `found-in-page` event never dispatches in headless containers - see Known limitations), pointer-driven window dragging, minimize/maximize state reflection (needs a real window manager), extensions, multi-window, and any manual UI interaction.
 
 ## Architecture
 
