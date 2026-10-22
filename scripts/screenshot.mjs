@@ -44,11 +44,14 @@ function launch(phase) {
       OPEN_ARC_USER_DATA: profile,
       OPEN_ARC_NO_SANDBOX: '1'
     }
+    // Software-compositing flags must ride the real command line; some
+    // Chromium switches are unreliable via appendSwitch in every environment.
+    const gpuFlags = ['--no-sandbox', '--in-process-gpu', '--disable-gpu-compositing']
     let cmd = electronPath
-    let args = ['.']
+    let args = ['.', ...gpuFlags]
     if (!process.env.DISPLAY) {
       cmd = 'xvfb-run'
-      args = ['-a', '-s', '-screen 0 1280x840x24', electronPath, '.']
+      args = ['-a', '-s', '-screen 0 1280x840x24', electronPath, '.', ...gpuFlags]
     }
     console.log(`[smoke] launching phase=${phase}`)
     const p = spawn(cmd, args, { cwd: root, env, stdio: ['ignore', 'inherit', 'inherit'] })

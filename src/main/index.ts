@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
+import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { AppState, Space, TabItem } from '../shared/types'
 import { COMMANDS } from '../shared/commands'
@@ -12,9 +13,17 @@ const isDev = !!process.env.ELECTRON_RENDERER_URL
 if (process.env.OPEN_ARC_USER_DATA) app.setPath('userData', process.env.OPEN_ARC_USER_DATA)
 if (process.env.OPEN_ARC_NO_SANDBOX) {
   app.commandLine.appendSwitch('no-sandbox')
-  // Headless CI containers often mount /dev/shm noexec, which kills tab
-  // renderers; fall back to /tmp for Chromium shared memory in harness runs.
-  app.commandLine.appendSwitch('disable-dev-shm-usage')
+  // Headless harness: software-composite in-process so tab views paint and
+  // capture without a GPU or a window manager.
+  app.commandLine.appendSwitch('in-process-gpu')
+  app.commandLine.appendSwitch('disable-gpu-compositing')
+  // Some CI containers mount /dev/shm noexec, which kills tab renderers;
+  // divert Chromium shared memory to /tmp only when /dev/shm is actually unusable.
+  try {
+    fs.accessSync('/dev/shm', fs.constants.W_OK | fs.constants.X_OK)
+  } catch {
+    app.commandLine.appendSwitch('disable-dev-shm-usage')
+  }
 }
 
 const SPACE_PALETTE = ['#7c6cf0', '#3fa66a', '#d0607e', '#4a90d9', '#d9963f', '#5bc8c0']

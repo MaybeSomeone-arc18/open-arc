@@ -25,6 +25,10 @@ Honest gaps: no sync, no accounts, no extensions, no downloads UI, no history se
 - **Minimize/maximize state reflection is not asserted headless.** The smoke suite executes the control path (same one the buttons call); under bare Xvfb there is no window manager to honor the state change, so the suite logs observed state instead of asserting it.
 - **Tab-content screenshots can be unavailable in restricted containers.** The suite's functional checks (titles, URLs, state) do not depend on pixels; page-content captures are saved when the compositor cooperates and skipped with a log note when it does not.
 
+### Related projects
+
+- [REA (Reverse Engineering Arc)](https://github.com/morluto/rea) was evaluated during planning as a potential shortcut for understanding Arc's UI structure. It was **not used**: Open Arc is a clean-room reimplementation built only from public sources (public screenshots, public documentation, and the publicly visible behavior of the Arc UI). No code, assets, or internal structure from Arc was taken, and no part of REA's output was incorporated.
+
 ## Verifying
 
 From a clean checkout (Node 22+, Linux/macOS/Windows):
@@ -71,13 +75,13 @@ Node 22+ required. Linux/macOS/Windows.
 
 ## Security notes
 
-`npm audit` (2026-10-23) reports 9 advisories, all in **development-time** dependencies:
+`npm audit` (2026-10-23) reports 3 advisories, all in **development-time** dependencies:
 
-- `electron` 33.4.11: known advisories including an ASAR integrity bypass (GHSA-vmqv-hx8q-j7mg). These matter for a packaged, distributed app; this PoC runs unpackaged in development. A major-version Electron upgrade is deliberately deferred until the PoC matures.
-- `esbuild` / `vite`: dev-server request forgery (GHSA-67mh-4wv8-2f99) - only affects `npm run dev` on an untrusted network.
-- `extract-zip` via `@electron/get`: install-time download tooling only.
+- `esbuild` / `vite` / `electron-vite`: dev-server request forgery (GHSA-67mh-4wv8-2f99) and a vite path-traversal issue in optimized-deps sourcemap handling - these only affect `npm run dev` on an untrusted network. They are build tooling; none of this code ships in the app.
 
-Runtime dependencies shipped to the app (`react`, `react-dom`) have no known advisories at audit time. Re-run `npm audit` before any packaged release.
+Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR integrity bypass, GHSA-vmqv-hx8q-j7mg) to **44.9.3**, a currently supported release. The upgrade is verified: `npm run typecheck`, `npm run build` and the full `npm run shot` smoke suite (13/13) pass on 44.9.3, and the suite's live-page captures render real content.
+
+Runtime dependencies shipped to the app (`react`, `react-dom`) have no known advisories at audit time. Re-run `npm audit` before any packaged release; no packaged build should be distributed until the remaining dev-tooling advisories are re-checked at that time.
 
 ## License
 
