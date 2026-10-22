@@ -405,6 +405,14 @@ class OpenArcApp {
         this.state.history = []
         this.commit()
         break
+      case 'close-others': {
+        if (!active) break
+        for (const t of [...space.today]) if (t.id !== active.id) this.tabs.close(t.id)
+        space.today = active.pinned ? [] : [active]
+        if (space.splitTabId && space.splitTabId !== active.id) space.splitTabId = null
+        this.commit()
+        break
+      }
       case 'clear-today':
         for (const t of [...space.today]) this.tabs.close(t.id)
         space.today = []
@@ -728,6 +736,23 @@ class OpenArcApp {
       this.state.spaces.length === spaceCount - 1 && !this.state.spaces.some((sp) => sp.id === tempSpaceId) && this.tabs.currentUrl(tempSpaceTabId) === null
     )
     this.switchTab(exampleTab.id) // restore focus for later checks
+
+    // Close Other Tabs: throwaway space, 3 tabs, keep only the active one
+    this.createSpace('Scratch')
+    this.openTab('https://example.com/')
+    const keepTab = this.activeTab()!
+    this.openTab('https://example.org/')
+    this.openTab('https://example.com/?a=1')
+    this.switchTab(keepTab.id)
+    this.runCommand('close-others')
+    const scratch = this.activeSpace()
+    check(
+      'command: close-others keeps only active tab',
+      scratch.today.length === 1 && scratch.today[0].id === keepTab.id && scratch.activeTabId === keepTab.id,
+      `today=${scratch.today.length}`
+    )
+    this.runCommand('delete-space')
+    this.switchTab(exampleTab.id)
 
     // Pin
     this.setPinned(exampleTab.id, true)

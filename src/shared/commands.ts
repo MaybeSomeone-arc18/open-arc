@@ -18,6 +18,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'split-view', title: 'Add Split View', hint: 'Ctrl+Shift+=' },
   { id: 'close-split', title: 'Close Split View', hint: 'Ctrl+Shift+-' },
   { id: 'clear-history', title: 'Clear Browsing History', hint: 'Remove all recorded history' },
+  { id: 'close-others', title: 'Close Other Tabs', hint: 'Keep only the active tab' },
   { id: 'clear-today', title: 'Clear Today Tabs' },
   { id: 'archive-now', title: 'Archive Idle Tabs Now' }
 ]
