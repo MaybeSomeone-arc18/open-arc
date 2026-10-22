@@ -176,6 +176,13 @@ class OpenArcApp {
       (tab) => this.recordHistory(tab),
       (url) => this.openTab(url)
     )
+    // Default-deny every web permission request (camera, mic, notifications,
+    // geolocation, ...). Electron grants them unless a handler says no; a
+    // browser shell must decide deliberately. No prompts exist yet, so deny.
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+      callback(false)
+    })
+
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
     if (isDev) {
@@ -321,7 +328,14 @@ class OpenArcApp {
         break
       case 'toggle-sidebar':
         this.state.sidebarVisible = !this.state.sidebarVisible
-        this.tabs.setSidebarVisible(this.state.sidebarVisible)
+        // Default-deny every web permission request (camera, mic, notifications,
+    // geolocation, ...). Electron grants them unless a handler says no; a
+    // browser shell must decide deliberately. No prompts exist yet, so deny.
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+      callback(false)
+    })
+
+    this.tabs.setSidebarVisible(this.state.sidebarVisible)
         this.commit()
         break
       case 'goto-tab': {
@@ -685,6 +699,12 @@ class OpenArcApp {
     )
     const dtClosed = await pollUntil(() => !this.tabs.isDevToolsOpen(exampleTab.id), 5000)
     check('shortcuts: F12 again closes DevTools', dtClosed)
+
+    // Permission requests are default-denied (Electron would grant them)
+    const permResult: string = await this.tabs
+      .webContentsFor(exampleTab.id)!
+      .executeJavaScript("Notification.requestPermission().then(p => String(p)).catch(e => 'err:' + e.message)")
+    check('permissions: Notification request is denied', permResult === 'denied', `result=${permResult}`)
 
     // Popups become tabs: window.open on the page opens a tab in this shell
     this.switchTab(exampleTab.id)
