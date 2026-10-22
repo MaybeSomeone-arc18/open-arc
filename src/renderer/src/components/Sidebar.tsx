@@ -81,7 +81,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         <div className="section-label with-action">
           <span>Today</span>
           <span>
-            <button className="ghost-btn" title="Split view (Ctrl+Shift+=)" onClick={() => window.openArc.runCommand('split-view')}>◫</button>
+            <button className="ghost-btn" title="Split view (Ctrl+Shift+=)" onClick={() => window.openArc.runCommand('split-view')}>▦</button>
             <button className="ghost-btn" title="New tab (Ctrl+T)" onClick={onOpenCommandBar}>＋</button>
           </span>
         </div>

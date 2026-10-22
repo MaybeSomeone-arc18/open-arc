@@ -51,7 +51,7 @@ function defaultState(): AppState {
 
 /** Fill fields added after a state file was written (forward-compatible loads). */
 function migrate(state: AppState): AppState {
-  state.archiveAfterMs = state.archiveAfterMs || Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000
+  state.archiveAfterMs = Number(process.env.OPEN_ARC_ARCHIVE_MS) || state.archiveAfterMs || 12 * 60 * 60 * 1000
   for (const s of state.spaces) {
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
