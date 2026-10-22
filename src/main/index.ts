@@ -173,7 +173,8 @@ class OpenArcApp {
         this.loadingEvents.push(`${tabId}:${loading ? 'start' : 'stop'}`)
         if (!this.win.isDestroyed()) this.win.webContents.send('tab:loading', tabId, loading)
       },
-      (tab) => this.recordHistory(tab)
+      (tab) => this.recordHistory(tab),
+      (url) => this.openTab(url)
     )
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
@@ -684,6 +685,24 @@ class OpenArcApp {
     )
     const dtClosed = await pollUntil(() => !this.tabs.isDevToolsOpen(exampleTab.id), 5000)
     check('shortcuts: F12 again closes DevTools', dtClosed)
+
+    // Popups become tabs: window.open on the page opens a tab in this shell
+    this.switchTab(exampleTab.id)
+    const beforePop = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
+    const winsBefore = BrowserWindow.getAllWindows().length
+    const popWc = this.tabs.webContentsFor(exampleTab.id)!
+    await popWc.executeJavaScript("window.open('https://example.org/','_blank')")
+    const popTab = await pollUntil(
+      () => [...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => !beforePop.has(t.id)),
+      5000
+    ).then(() => [...this.activeSpace().pinned, ...this.activeSpace().today].find((t) => !beforePop.has(t.id)))
+    check(
+      'popups open as tabs, not OS windows',
+      !!popTab && popTab.url.includes('example.org') && BrowserWindow.getAllWindows().length === winsBefore,
+      `tab=${popTab?.url ?? 'none'} windows=${BrowserWindow.getAllWindows().length}->${winsBefore}`
+    )
+    if (popTab) this.closeTab(popTab.id)
+    this.switchTab(exampleTab.id)
 
     // Ctrl+U opens view-source of the active tab in a new tab
     const beforeSrc = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))

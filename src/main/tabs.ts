@@ -20,7 +20,8 @@ export class TabLayer {
     win: BrowserWindow,
     onTabUpdated: (tab: TabItem) => void,
     onLoading: (tabId: string, loading: boolean) => void = () => {},
-    private onNavigate: (tab: TabItem) => void = () => {}
+    private onNavigate: (tab: TabItem) => void = () => {},
+    private onOpenInNewTab: (url: string) => void = () => {}
   ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
@@ -77,6 +78,11 @@ export class TabLayer {
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
+    })
+    // Popups (window.open, target=_blank) become tabs in this shell, never OS windows.
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//.test(url)) this.onOpenInNewTab(url)
+      return { action: 'deny' }
     })
     // Navigation resets zoom to the origin default, so a stored factor must
     // be (re)applied after the page finishes loading.
@@ -184,6 +190,10 @@ export class TabLayer {
     if (wc.isDevToolsOpened()) wc.closeDevTools()
     else wc.openDevTools({ mode: 'detach' })
     return wc.isDevToolsOpened()
+  }
+
+  webContentsFor(tabId: string): Electron.WebContents | null {
+    return this.views.get(tabId)?.webContents ?? null
   }
 
   isDevToolsOpen(tabId: string): boolean {
