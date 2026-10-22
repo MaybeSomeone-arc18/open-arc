@@ -410,7 +410,18 @@ class OpenArcApp {
       case 'duplicate-tab': {
         if (!active) break
         const url = this.tabs.currentUrl(active.id) ?? active.url
-        if (url) this.openTab(url)
+        if (!url) break
+        const tab = makeTab(url, false)
+        // Insert right after the original, like every other browser
+        if (active.pinned) {
+          space.today.push(tab)
+        } else {
+          const idx = space.today.findIndex((t) => t.id === active.id)
+          space.today.splice(idx === -1 ? space.today.length : idx + 1, 0, tab)
+        }
+        space.activeTabId = tab.id
+        tab.lastActiveAt = Date.now()
+        this.commit()
         break
       }
       case 'reopen-closed-tab': {
@@ -749,10 +760,13 @@ class OpenArcApp {
       () => [...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => !beforeIds.has(t.id)),
       5000
     ).then(() => [...this.activeSpace().pinned, ...this.activeSpace().today].find((t) => !beforeIds.has(t.id)))
+    const wikiIdx = this.activeSpace().today.findIndex((t) => t.id === wikiTab.id)
+    const dupIdx = dupTab ? this.activeSpace().today.findIndex((t) => t.id === dupTab.id) : -1
     check(
       'shortcuts: Ctrl+Shift+K duplicates active tab',
-      !!dupTab && dupTab.url.includes('wikipedia.org/wiki/Web_browser') && this.activeSpace().activeTabId === dupTab.id,
-      `dupUrl=${dupTab?.url ?? 'none'}`
+      !!dupTab && dupTab.url.includes('wikipedia.org/wiki/Web_browser') && this.activeSpace().activeTabId === dupTab.id &&
+        dupIdx === wikiIdx + 1,
+      `dupUrl=${dupTab?.url ?? 'none'} dupIdx=${dupIdx} wikiIdx=${wikiIdx}`
     )
     if (dupTab) this.closeTab(dupTab.id)
     this.switchTab(wikiTab.id)
