@@ -31,6 +31,7 @@ const SPACE_PALETTE = ['#7c6cf0', '#3fa66a', '#d0607e', '#4a90d9', '#d9963f', '#
 function normalizeUrl(input: string): string {
   const s = input.trim()
   if (/^https?:\/\//i.test(s)) return s
+  if (/^view-source:https?:\/\//i.test(s)) return s
   if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(s)) return `https://${s}`
   return `https://duckduckgo.com/?q=${encodeURIComponent(s)}`
 }
@@ -367,6 +368,12 @@ class OpenArcApp {
         this.commit()
         break
       }
+      case 'view-source': {
+        if (!active) break
+        const srcUrl = this.tabs.currentUrl(active.id) ?? active.url
+        if (/^https?:\/\//.test(srcUrl)) this.openTab(`view-source:${srcUrl}`)
+        break
+      }
       case 'duplicate-tab': {
         if (!active) break
         const url = this.tabs.currentUrl(active.id) ?? active.url
@@ -677,6 +684,24 @@ class OpenArcApp {
     )
     const dtClosed = await pollUntil(() => !this.tabs.isDevToolsOpen(exampleTab.id), 5000)
     check('shortcuts: F12 again closes DevTools', dtClosed)
+
+    // Ctrl+U opens view-source of the active tab in a new tab
+    const beforeSrc = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'u',ctrlKey:true,bubbles:true}))"
+    )
+    const srcOpened = await pollUntil(
+      () => [...this.activeSpace().pinned, ...this.activeSpace().today].some((t) => !beforeSrc.has(t.id)),
+      5000
+    )
+    const srcTab = [...this.activeSpace().pinned, ...this.activeSpace().today].find((t) => !beforeSrc.has(t.id))
+    check(
+      'shortcuts: Ctrl+U opens view-source',
+      srcOpened && !!srcTab && srcTab.url.startsWith('view-source:https://'),
+      `url=${srcTab?.url ?? 'none'}`
+    )
+    if (srcTab) this.closeTab(srcTab.id)
+    this.switchTab(exampleTab.id)
 
     // Command bar fuzzy search (real renderer path): subsequence query 'wbr'
     // must surface the open Wikipedia tab.

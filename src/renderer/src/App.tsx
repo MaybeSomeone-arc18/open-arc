@@ -92,6 +92,10 @@ export function App(): JSX.Element {
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'u') {
+        e.preventDefault()
+        window.openArc.runCommand('view-source')
+      }
       if (e.key === 'F12' || (mod && e.shiftKey && e.key.toLowerCase() === 'i')) {
         e.preventDefault()
         window.openArc.toggleDevTools()
