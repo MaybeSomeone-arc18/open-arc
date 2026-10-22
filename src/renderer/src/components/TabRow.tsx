@@ -3,16 +3,23 @@ import type { TabItem } from '../../../shared/types'
 interface Props {
   tab: TabItem
   active: boolean
+  loading?: boolean
 }
 
-export function TabRow({ tab, active }: Props): JSX.Element {
+export function TabRow({ tab, active, loading }: Props): JSX.Element {
   return (
     <div
       className={`tab-row ${active ? 'active' : ''}`}
       onClick={() => window.openArc.switchTab(tab.id)}
       title={tab.url}
     >
-      {tab.favicon ? <img className="favicon" src={tab.favicon} alt="" /> : <span className="favicon fallback">◦</span>}
+      {loading ? (
+        <span className="favicon loading" title="Loading">⟳</span>
+      ) : tab.favicon ? (
+        <img className="favicon" src={tab.favicon} alt="" />
+      ) : (
+        <span className="favicon fallback">◦</span>
+      )}
       <span className="tab-title">{tab.title || tab.url}</span>
       <span className="tab-actions" onClick={(e) => e.stopPropagation()}>
         <button

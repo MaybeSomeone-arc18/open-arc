@@ -14,10 +14,12 @@ export class TabLayer {
   private win: BrowserWindow
   private sidebarVisible = true
   private onTabUpdated: (tab: TabItem) => void
+  private onLoading: (tabId: string, loading: boolean) => void
 
-  constructor(win: BrowserWindow, onTabUpdated: (tab: TabItem) => void) {
+  constructor(win: BrowserWindow, onTabUpdated: (tab: TabItem) => void, onLoading: (tabId: string, loading: boolean) => void = () => {}) {
     this.win = win
     this.onTabUpdated = onTabUpdated
+    this.onLoading = onLoading
     win.on('resize', () => this.layout())
   }
 
@@ -46,7 +48,8 @@ export class TabLayer {
     if (existing) return existing
     const view = new WebContentsView()
     this.views.set(tab.id, view)
-    view.webContents.loadURL(tab.url)
+    // Attach listeners BEFORE loadURL: with in-process rendering the
+    // load events can dispatch synchronously and would be missed.
     const push = (): void => {
       tab.title = view.webContents.getTitle() || tab.url
       this.onTabUpdated({ ...tab, title: tab.title })
@@ -60,10 +63,13 @@ export class TabLayer {
       tab.url = view.webContents.getURL()
       push()
     })
+    view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
+    view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
     })
+    view.webContents.loadURL(tab.url)
     return view
   }
 

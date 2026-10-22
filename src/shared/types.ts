@@ -46,6 +46,8 @@ export interface CommandDef {
 export interface OpenArcApi {
   getState(): Promise<AppState>
   onStateChanged(cb: (state: AppState) => void): () => void
+  /** Transient (never persisted): tab page load start/stop. */
+  onTabLoading(cb: (tabId: string, loading: boolean) => void): () => void
 
   switchSpace(spaceId: string): void
   createSpace(name: string): void

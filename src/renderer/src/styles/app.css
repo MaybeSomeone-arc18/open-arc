@@ -126,3 +126,6 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 
 .empty-hint.clickable { cursor: pointer; }
 .empty-hint.clickable:hover { color: var(--text); }
+
+@keyframes oa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.favicon.loading { display: inline-block; animation: oa-spin 1s linear infinite; color: var(--space-color); }

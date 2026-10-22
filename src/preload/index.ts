@@ -8,6 +8,11 @@ const api: OpenArcApi = {
     ipcRenderer.on('state:changed', listener)
     return () => ipcRenderer.removeListener('state:changed', listener)
   },
+  onTabLoading: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, tabId: string, loading: boolean): void => cb(tabId, loading)
+    ipcRenderer.on('tab:loading', listener)
+    return () => ipcRenderer.removeListener('tab:loading', listener)
+  },
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),

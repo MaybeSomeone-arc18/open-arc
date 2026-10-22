@@ -5,10 +5,11 @@ import { TabRow } from './TabRow'
 interface Props {
   state: AppState
   space: Space
+  loadingTabs: Set<string>
   onOpenCommandBar: () => void
 }
 
-export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element {
+export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props): JSX.Element {
   const [urlDraft, setUrlDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [showAllArchived, setShowAllArchived] = useState(false)
@@ -70,7 +71,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         <div className="section-label">Pinned</div>
         {space.pinned.length === 0 && <div className="empty-hint">Pin tabs to keep them here</div>}
         {space.pinned.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId} />
+          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId} loading={loadingTabs.has(tab.id)} />
         ))}
 
         <div className="section-label with-action">
@@ -82,7 +83,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         </div>
         {space.today.length === 0 && <div className="empty-hint">Open tabs appear here</div>}
         {space.today.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId || tab.id === space.splitTabId} />
+          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId || tab.id === space.splitTabId} loading={loadingTabs.has(tab.id)} />
         ))}
 
         {space.archived.length > 0 && (

@@ -81,6 +81,8 @@ class OpenArcApp {
   private tabs!: TabLayer
   private store = new StateStore()
   private state: AppState
+  /** Load start/stop markers, used by the smoke suite (and handy in dev logs). */
+  private loadingEvents: string[] = []
 
   constructor() {
     this.state = migrate(this.store.load() ?? defaultState())
@@ -119,7 +121,14 @@ class OpenArcApp {
         sandbox: false
       }
     })
-    this.tabs = new TabLayer(this.win, () => this.commit())
+    this.tabs = new TabLayer(
+      this.win,
+      () => this.commit(),
+      (tabId, loading) => {
+        this.loadingEvents.push(`${tabId}:${loading ? 'start' : 'stop'}`)
+        if (!this.win.isDestroyed()) this.win.webContents.send('tab:loading', tabId, loading)
+      }
+    )
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
     if (isDev) {
@@ -403,6 +412,10 @@ class OpenArcApp {
     const exampleTab = this.activeTab()!
     const loaded = await pollUntil(() => exampleTab.title === 'Example Domain', 15000)
     check('navigation: example.com loads (live title)', loaded, `title="${exampleTab.title}"`)
+    check(
+      'loading indicator events fire (start + stop)',
+      this.loadingEvents.includes(`${exampleTab.id}:start`) && this.loadingEvents.includes(`${exampleTab.id}:stop`)
+    )
     const cap = await this.tabs.capture(exampleTab.id)
     if (cap) writeFileSync(`${dir}/3-tab-content.png`, cap)
     else console.log('[openarc] note: tab content capture unavailable in this environment (compositor-restricted)')
