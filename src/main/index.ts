@@ -616,6 +616,7 @@ class OpenArcApp {
     )
     const zoomReset = await pollUntil(() => Math.abs(this.tabs.getZoom(exampleTab.id) - 1) < 0.001, 5000)
     check('zoom: Ctrl+0 resets to 100%', zoomReset, `factor=${this.tabs.getZoom(exampleTab.id)}`)
+    check('zoom: shell UI is never zoomed', Math.abs(this.win.webContents.getZoomFactor() - 1) < 0.001, `shell=${this.win.webContents.getZoomFactor()}`)
     // Leave a persisted 125% marker on the pinned example tab for the verify phase
     exampleTab.zoom = 1.25
 
@@ -931,6 +932,13 @@ class OpenArcApp {
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,altKey:true,bubbles:true}))"
     )
     const wikiWc = this.tabs.webContentsFor(wikiTab.id)!
+    await pollUntil(
+      () =>
+        wikiWc.executeJavaScript(
+          "[...document.querySelectorAll('p')].some((p) => (p.textContent || '').trim().length > 200)"
+        ),
+      10000
+    )
     let readerOn = false
     for (let i = 0; i < 20 && !readerOn; i++) {
       readerOn = await wikiWc.executeJavaScript("!!document.getElementById('oa-reader-overlay')")
@@ -939,7 +947,16 @@ class OpenArcApp {
     const readerTitle: string = readerOn
       ? await wikiWc.executeJavaScript("document.querySelector('.oa-reader h1')?.textContent ?? ''")
       : ''
-    check('reader mode: overlay with article title', readerOn === true && /Web browser/.test(readerTitle), `title="${readerTitle.slice(0, 40)}"`)
+    const readerParas: number = readerOn ? await wikiWc.executeJavaScript("document.querySelectorAll('#oa-reader-overlay p').length") : 0
+    check(
+      'reader mode: overlay with article title',
+      readerOn === true && /Web browser/.test(readerTitle) && readerParas >= 1,
+      `title="${readerTitle.slice(0, 40)}" paragraphs=${readerParas}`
+    )
+    if (readerOn && !wikiWc.isDestroyed()) {
+      const readerImg = await wikiWc.capturePage()
+      writeFileSync(`${dir}/9-reader-mode.png`, readerImg.toPNG())
+    }
     await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,altKey:true,bubbles:true}))"
     )

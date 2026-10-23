@@ -48,9 +48,32 @@ export function readerToggle(): string {
   h.textContent = title
   h.setAttribute('style', 'font:700 32px/1.25 Georgia,serif;margin:0 0 24px;')
   col.appendChild(h)
-  best.querySelectorAll('p, h2, h3, blockquote, pre, ul, ol').forEach((node) => {
+  const SELECTOR = 'p, h2, h3, blockquote, pre, ul, ol'
+  best.querySelectorAll(SELECTOR).forEach((node) => {
+    // Skip blocks nested inside another selected block: the parent's clone
+    // already contains them (nested lists would otherwise appear twice).
+    const parent = node.parentElement
+    if (parent && parent.closest(SELECTOR) && best.contains(parent.closest(SELECTOR))) return
     const text = (node.textContent ?? '').trim()
     if (text.length < 2) return
+    // Skip navigation-like lists (tables of contents, link lists): most
+    // items are dominated by an anchor. Whole-list text ratios miss these
+    // when items carry non-link chrome (toggle buttons, badges).
+    if (node.tagName === 'UL' || node.tagName === 'OL') {
+      const items = Array.from(node.children).filter((c) => c.tagName === 'LI')
+      if (items.length > 0) {
+        let linkItems = 0
+        for (const li of items) {
+          const liText = (li.textContent ?? '').trim().length
+          let aLen = 0
+          li.querySelectorAll('a').forEach((a) => {
+            aLen += (a.textContent ?? '').trim().length
+          })
+          if (liText > 0 && aLen / liText > 0.5) linkItems++
+        }
+        if (linkItems / items.length > 0.6) return
+      }
+    }
     const clone = node.cloneNode(true) as HTMLElement
     clone.removeAttribute('style')
     clone.removeAttribute('class')
