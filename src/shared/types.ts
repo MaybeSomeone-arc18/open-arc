@@ -29,6 +29,10 @@ export interface Space {
   activeTabId: string | null
   /** When set, this tab renders beside the active tab (2-pane split). */
   splitTabId: string | null
+  /** ID of the tab that currently has active keyboard/navigation focus (activeTabId or splitTabId). */
+  focusedTabId?: string | null
+  /** Width fraction of the left (active) pane when splitTabId is set. In [0.1, 0.9], defaults to 0.5. */
+  splitRatio?: number
 }
 
 export interface ClosedTab {
@@ -57,6 +61,8 @@ export interface AppState {
   windowBounds: { x: number; y: number; width: number; height: number } | null
   /** Navigation history, most recent first, capped at 500. */
   history: HistoryEntry[]
+  /** Global favorite tabs (pinned permanently across all Spaces). */
+  favorites?: TabItem[]
 }
 
 export interface CommandDef {
@@ -66,6 +72,34 @@ export interface CommandDef {
 }
 
 /** Everything the renderer is allowed to ask the main process to do. */
+export interface RecoveryOfferInfo {
+  /** Basename of the offered state.json.fresh-<ts> candidate. */
+  candidateName: string
+  candidateTimestamp: string
+  spaceCount: number
+  spaceNames: string[]
+  /** mtime of the current state.json; null when it does not exist. */
+  currentTimestamp: string | null
+  currentValid: boolean
+  /** Other candidates kept on disk for later individual decisions. */
+  otherNames: string[]
+  /** Malformed files kept on disk, never loaded. */
+  malformedNames: string[]
+}
+
+export interface RecoveryMalformedNotice {
+  names: string[]
+  currentValid: boolean
+}
+
+export interface RecoveryResult {
+  ok: boolean
+  accepted: boolean
+  error?: string
+  /** Post-commit durability/cleanup warning; the recovery still committed. */
+  warning?: string
+}
+
 export interface OpenArcApi {
   getState(): Promise<AppState>
   onStateChanged(cb: (state: AppState) => void): () => void
@@ -75,6 +109,11 @@ export interface OpenArcApi {
   onDownloadDone(cb: (info: { filename: string; path: string; state: string; size?: number }) => void): () => void
   onStateRecovered(cb: (quarantinedPath: string) => void): () => void
   onSaveFailed(cb: (error: string) => void): () => void
+  onRecoveryOffer(cb: (info: RecoveryOfferInfo) => void): () => void
+  onRecoveryMalformed(cb: (notice: RecoveryMalformedNotice) => void): () => void
+  onRecoveryResult(cb: (result: RecoveryResult) => void): () => void
+  chooseRecovery(accept: boolean): void
+  dismissRecoveryMalformed(keep: boolean): void
 
   switchSpace(spaceId: string): void
   createSpace(name: string): void
@@ -83,9 +122,11 @@ export interface OpenArcApi {
   openTab(url: string): void
   closeTab(tabId: string): void
   switchTab(tabId: string): void
+  splitTabWith(tabId: string): void
   pinTab(tabId: string): void
   unpinTab(tabId: string): void
   restoreTab(tabId: string): void
+  toggleFavorite(tabId: string): void
 
   navigate(command: 'back' | 'forward' | 'reload'): void
   findInPage(text: string, findNext?: boolean): Promise<{ matches: number; activeMatchOrdinal: number } | null>
@@ -108,4 +149,11 @@ export interface OpenArcApi {
 
   runCommand(commandId: string, arg?: string): void
   listCommands(): Promise<CommandDef[]>
+
+  /** Split divider drag controls. */
+  startSplitDrag(): void
+  previewSplitRatio(ratio: number): void
+  commitSplitRatio(ratio: number): void
+  cancelSplitRatio(): void
+  resetSplitRatio(): void
 }
