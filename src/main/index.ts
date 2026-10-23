@@ -751,7 +751,10 @@ class OpenArcApp {
    *  pass as green. A phase whose checks already failed keeps its nonzero
    *  code. The check results come from the written report; the exit code
    *  additionally fails the run whenever the force-exit path was needed. */
+  private stallGuard: ReturnType<typeof setTimeout> | null = null
+
   private exitSelfTest(code: number): void {
+    if (this.stallGuard) { clearTimeout(this.stallGuard); this.stallGuard = null }
     console.log(`[openarc] selfTest exiting with code ${code}`)
     app.exit(code)
     setTimeout(() => {
@@ -770,12 +773,26 @@ class OpenArcApp {
     if (!dir) return
     if (this.selfTestStarted) return // did-finish-load also fires after a harness re-open
     this.selfTestStarted = true
+    const stallGuard = setTimeout(() => {
+      console.error('[openarc] selfTest stalled: no completion within 120s; forcing exit(98) - phase stall, run FAILED')
+      const raw = (process as unknown as { reallyExit?: (c: number) => never }).reallyExit
+      if (raw) raw.call(process, 98)
+      else process.kill(process.pid, 'SIGKILL')
+    }, 120000)
+    stallGuard.unref()
+    this.stallGuard = stallGuard
     if (process.env.OPEN_ARC_OVERLAY_VERIFY) return this.overlayVerify(dir)
     const { writeFileSync, mkdirSync } = await import('node:fs')
     mkdirSync(dir, { recursive: true })
     const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+    const slowLog = <T>(label: string, p: Promise<T>): Promise<T> => {
+      const t = setTimeout(() => console.error(`[openarc] DIAGNOSTIC: ${label} still pending after 20s`), 20000)
+      t.unref()
+      return p.finally(() => clearTimeout(t))
+    }
     const shot = async (name: string): Promise<void> => {
-      const img = await this.win.webContents.capturePage()
+      console.log(`[openarc] step: capturePage(${name})`)
+      const img = await slowLog(`capturePage(${name})`, this.win.webContents.capturePage())
       writeFileSync(`${dir}/${name}.png`, img.toPNG())
     }
     const checks: { name: string; pass: boolean; detail: string }[] = []
