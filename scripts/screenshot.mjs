@@ -59,10 +59,11 @@ function launch(phase) {
     ]
     let cmd = electronPath
     let args = ['.', ...gpuFlags]
-    if (!process.env.DISPLAY) {
+    if (process.platform === 'linux' && !process.env.DISPLAY) {
       cmd = 'xvfb-run'
       args = ['-a', '-s', '-screen 0 1280x840x24', electronPath, '.', ...gpuFlags]
     }
+    // macOS/Windows launch Electron directly: they always have a window server.
     console.log(`[smoke] launching phase=${phase}`)
     const p = spawn(cmd, args, { cwd: root, env, stdio: ['ignore', 'inherit', 'inherit'] })
     p.on('error', (e) => { console.error(`[smoke] launch failed: ${e.message}`); resolve(1) })
