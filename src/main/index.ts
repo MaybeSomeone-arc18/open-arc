@@ -8,6 +8,7 @@ import type { AppState, Space, TabItem } from '../shared/types'
 import { COMMANDS } from '../shared/commands'
 import { StateStore } from './store'
 import { TabLayer } from './tabs'
+import { isTrustedSender, installPermissionPolicy, str, id as idv, oneOf, commandId, userUrl, type TrustConfig } from './security'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -183,9 +184,7 @@ class OpenArcApp {
     // Default-deny every web permission request (camera, mic, notifications,
     // geolocation, ...). Electron grants them unless a handler says no; a
     // browser shell must decide deliberately. No prompts exist yet, so deny.
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false)
-    })
+    installPermissionPolicy(session.defaultSession)
 
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
@@ -1233,53 +1232,82 @@ class OpenArcApp {
     if (action === 'close') this.win.close()
   }
 
+  private trust(): TrustConfig {
+    return {
+      shellWebContentsId: this.win.webContents.id,
+      devUrl: isDev ? process.env.ELECTRON_RENDERER_URL : undefined,
+      packagedIndexPath: isDev ? undefined : join(__dirname, '../renderer/index.html')
+    }
+  }
+
   private registerIpc(): void {
-    ipcMain.handle('state:get', () => this.state)
-    ipcMain.handle('commands:list', () => COMMANDS)
+    // Every channel goes through these two wrappers: a rejected caller gets
+    // no state and triggers no effect (invoke -> null, send -> dropped).
+    const handle = (channel: string, fn: (...a: any[]) => unknown): void => {
+      ipcMain.handle(channel, (e, ...args) => (isTrustedSender(e, this.trust()) ? fn(...args) : null))
+    }
+    const on = (channel: string, fn: (...a: any[]) => void): void => {
+      ipcMain.on(channel, (e, ...args) => {
+        if (isTrustedSender(e, this.trust())) fn(...args)
+      })
+    }
+    handle('state:get', () => this.state)
+    handle('commands:list', () => COMMANDS)
 
-    ipcMain.on('space:switch', (_e, spaceId: string) => {
-      if (this.state.spaces.some((s) => s.id === spaceId)) {
-        this.state.activeSpaceId = spaceId
+    on('space:switch', (spaceId: unknown) => {
+      const sid = idv(spaceId)
+      if (sid && this.state.spaces.some((s) => s.id === sid)) {
+        this.state.activeSpaceId = sid
         this.commit()
       }
     })
-    ipcMain.on('space:create', (_e, name: string) => this.createSpace(name))
-    ipcMain.on('space:rename', (_e, spaceId: string, name: string) => {
-      const s = this.state.spaces.find((sp) => sp.id === spaceId)
-      if (s && name.trim()) {
-        s.name = name.trim()
-        s.icon = name.trim().charAt(0).toUpperCase()
+    on('space:create', (name: unknown) => {
+      const n = str(name, 100)
+      if (n !== null) this.createSpace(n)
+    })
+    on('space:rename', (spaceId: unknown, name: unknown) => {
+      const sid = idv(spaceId)
+      const n = str(name, 100)
+      const s = sid ? this.state.spaces.find((sp) => sp.id === sid) : undefined
+      if (s && n && n.trim()) {
+        s.name = n.trim()
+        s.icon = n.trim().charAt(0).toUpperCase()
         this.commit()
       }
     })
 
-    ipcMain.on('tab:open', (_e, url: string) => this.openTab(url))
-    ipcMain.on('tab:close', (_e, tabId: string) => this.closeTab(tabId))
-    ipcMain.on('tab:switch', (_e, tabId: string) => this.switchTab(tabId))
-    ipcMain.on('tab:pin', (_e, tabId: string) => this.setPinned(tabId, true))
-    ipcMain.on('tab:unpin', (_e, tabId: string) => this.setPinned(tabId, false))
-    ipcMain.on('tab:restore', (_e, tabId: string) => this.restoreTab(tabId))
-    ipcMain.handle('find:in-page', (_e, text: string, findNext: boolean) => {
+    on('tab:open', (url: unknown) => {
+      const u = userUrl(url)
+      if (u !== null) this.openTab(u)
+    })
+    on('tab:close', (t: unknown) => { const v = idv(t); if (v) this.closeTab(v) })
+    on('tab:switch', (t: unknown) => { const v = idv(t); if (v) this.switchTab(v) })
+    on('tab:pin', (t: unknown) => { const v = idv(t); if (v) this.setPinned(v, true) })
+    on('tab:unpin', (t: unknown) => { const v = idv(t); if (v) this.setPinned(v, false) })
+    on('tab:restore', (t: unknown) => { const v = idv(t); if (v) this.restoreTab(v) })
+    handle('find:in-page', (text: unknown, findNext: unknown) => {
+      const t = str(text, 500)
       const active = this.activeTab()
-      return active ? this.tabs.findIn(active.id, text, !!findNext) : null
+      return active && t !== null ? this.tabs.findIn(active.id, t, !!findNext) : null
     })
-    ipcMain.on('find:stop', () => {
+    on('find:stop', () => {
       const active = this.activeTab()
       if (active) this.tabs.stopFind(active.id)
     })
-    ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
+    handle('tab:zoom', (action: unknown) => {
+      const a = oneOf(action, ['in', 'out', 'reset'] as const)
       const active = this.activeTab()
-      if (!active) return 1
-      const factor = this.tabs.adjustZoom(active.id, action)
+      if (!active || !a) return 1
+      const factor = this.tabs.adjustZoom(active.id, a)
       active.zoom = factor // persisted; restored when the view is (re)created
       this.store.save(this.state)
       return factor
     })
-    ipcMain.handle('tab:mute-toggle', () => {
+    handle('tab:mute-toggle', () => {
       const active = this.activeTab()
       return active ? this.tabs.toggleMute(active.id) : false
     })
-    ipcMain.handle('tab:print-pdf', async () => {
+    handle('tab:print-pdf', async () => {
       const active = this.activeTab()
       const wc = active ? this.tabs.webContentsFor(active.id) : null
       if (!wc) return null
@@ -1296,7 +1324,7 @@ class OpenArcApp {
         return null
       }
     })
-    ipcMain.handle('tab:reader', async () => {
+    handle('tab:reader', async () => {
       const active = this.activeTab()
       const wc = active ? this.tabs.webContentsFor(active.id) : null
       if (!wc) return 'no-content'
@@ -1306,24 +1334,32 @@ class OpenArcApp {
         return 'no-content'
       }
     })
-    ipcMain.handle('tab:devtools', () => {
+    handle('tab:devtools', () => {
       const active = this.activeTab()
       return active ? this.tabs.toggleDevTools(active.id) : false
     })
-    ipcMain.handle('tab:copy-url', () => {
+    handle('tab:copy-url', () => {
       const active = this.activeTab()
       if (!active) return null
       const url = this.tabs.currentUrl(active.id)
       if (url) clipboard.writeText(url)
       return url
     })
-    ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
+    on('nav', (cmd: unknown) => {
+      const c = oneOf(cmd, ['back', 'forward', 'reload'] as const)
       const active = this.activeTab()
-      if (active) this.tabs.navigate(active.id, cmd)
+      if (active && c) this.tabs.navigate(active.id, c)
     })
-    ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
-    ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'close') => this.windowControl(action))
-    ipcMain.on('command:run', (_e, id: string, arg?: string) => this.runCommand(id, arg))
+    on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
+    on('window:control', (action: unknown) => {
+      const a = oneOf(action, ['minimize', 'maximize', 'close'] as const)
+      if (a) this.windowControl(a)
+    })
+    on('command:run', (cid: unknown, arg: unknown) => {
+      const c = commandId(cid)
+      const a = arg === undefined || arg === null ? undefined : str(arg)
+      if (c && a !== null) this.runCommand(c, a)
+    })
   }
 }
 
