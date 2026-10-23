@@ -1216,6 +1216,64 @@ class OpenArcApp {
     this.closeTab(dlTab.id)
     dlServer.close()
 
+    // Native rejected-caller check: a REAL second BrowserWindow with the same
+    // preload (so window.openArc exists) but a foreign origin must get no state
+    // and cause no effect through real Electron IPC. Positive control: the shell
+    // itself still gets state.
+    {
+      const rogueHtml = `${dir}/rogue.html`
+      writeFileSync(rogueHtml, '<!doctype html><title>rogue</title>')
+      const probe = `(async () => { const out = {}; const o = window.openArc;
+        out.hasApi = !!o;
+        out.state = await o.getState();
+        out.cmds = await o.listCommands();
+        out.url = await o.copyActiveUrl();
+        out.zoom = await o.zoom('in');
+        o.openTab('https://example.net/rogue'); o.runCommand('toggle-sidebar'); o.windowControl('minimize');
+        o.runCommand('new-space', 'RogueSpace'); o.createSpace('RogueSpace2');
+        await new Promise((r) => setTimeout(r, 800));
+        return out })()`
+      const sidebarBefore = this.state.sidebarVisible
+      const tabsBefore = this.state.spaces.reduce((n, sp) => n + sp.pinned.length + sp.today.length, 0)
+      const spacesBefore = this.state.spaces.length
+      const results: Array<{ label: string; r: any }> = []
+      for (const [label, load] of [
+        ['data: origin', (w: BrowserWindow) => w.loadURL('data:text/html,<title>x</title>')],
+        ['other file: origin', (w: BrowserWindow) => w.loadFile(rogueHtml)]
+      ] as const) {
+        const rogue = new BrowserWindow({
+          show: false,
+          webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: true }
+        })
+        try {
+          await load(rogue)
+          results.push({ label, r: await rogue.webContents.executeJavaScript(probe) })
+        } catch (err) {
+          results.push({ label, r: { error: String(err) } })
+        }
+        rogue.destroy()
+      }
+      const shellState = await this.win.webContents.executeJavaScript('window.openArc.getState()')
+      const tabsAfter = this.state.spaces.reduce((n, sp) => n + sp.pinned.length + sp.today.length, 0)
+      for (const { label, r } of results) {
+        check(
+          `native IPC: rogue window (${label}) gets no state and no effect`,
+          r.hasApi === true && r.state === null && r.cmds === null && r.url === null && r.zoom === null,
+          JSON.stringify(r).slice(0, 160)
+        )
+      }
+      check(
+        'native IPC: rogue window caused no privileged effects',
+        this.state.sidebarVisible === sidebarBefore &&
+          tabsAfter === tabsBefore &&
+          this.state.spaces.length === spacesBefore &&
+          !this.win.isMinimized() &&
+          !this.state.spaces.some((sp) => sp.name.startsWith('Rogue')),
+        `tabs ${tabsBefore}->${tabsAfter} spaces ${spacesBefore}->${this.state.spaces.length}`
+      )
+      check('native IPC: legitimate shell caller still gets state', !!shellState && Array.isArray(shellState.spaces))
+    }
+
     // Window bounds persistence: set a distinctive size; the verify phase
     // asserts both the saved state and the restored live window.
     this.win.setSize(1000, 700)
