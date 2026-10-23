@@ -66,7 +66,7 @@ npm run shot        # smoke suite: launches the real app twice and checks it
 `npm run shot` (`scripts/screenshot.mjs`) runs the production build against a fresh temporary profile, twice:
 
 - **Run phase** - window controls execute, command bar opens on Ctrl+T (with fuzzy-search matching), example.com loads with its real title, loading start/stop events fire, per-tab zoom in and reset via real keydowns, in-tab forward/back navigation, tab switching within a space, Ctrl+1 / Ctrl+9 tab jumps, copy-URL to the real clipboard, tab mute/unmute, Ctrl+Tab cycling, Ctrl+R reloading the tab (never the shell), split view on/off, space creation, cross-space tab switching, pinning, reopen-closed-tab, auto-archive of an idle tab with restore, a real download landing in the Downloads folder, and space deletion. Genuine screenshots land in `shots/` alongside `report-run.json`.
-- **Verify phase** - relaunches on the same profile and checks that spaces, pinned tabs and the archive survived the restart (`report-verify.json`).
+- **Verify phase** - relaunches on the same profile and checks that spaces, pinned tabs, zoom, the archive, history, recently-closed tabs and window bounds survived the restart (`report-verify.json`).
 
 The suite exits non-zero if any check fails. On headless Linux it wraps itself in `xvfb-run`. It needs network access - the navigation checks load example.com, example.org and wikipedia.org for real.
 
@@ -102,7 +102,7 @@ Node 22+ required. Linux/macOS/Windows.
 
 - `esbuild` / `vite` / `electron-vite`: dev-server request forgery (GHSA-67mh-4wv8-2f99) and a vite path-traversal issue in optimized-deps sourcemap handling - these only affect `npm run dev` on an untrusted network. They are build tooling; none of this code ships in the app.
 
-Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR integrity bypass, GHSA-vmqv-hx8q-j7mg) to **44.9.3**, a currently supported release. The upgrade is verified: `npm run typecheck`, `npm run build` and the full `npm run shot` smoke suite pass on 44.9.3 (the suite has since grown to 50 checks), and the suite's live-page captures render real content.
+Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR integrity bypass, GHSA-vmqv-hx8q-j7mg) to **44.9.3**, a currently supported release. The upgrade is verified: `npm run typecheck`, `npm run build` and the full `npm run shot` smoke suite pass on 44.9.3 (the suite has since grown to 62 checks), and the suite's live-page captures render real content.
 
 Browser-shell hardening: every web permission request (camera, mic, notifications, geolocation, ...) is default-denied until a consent UI exists - Electron grants them by default otherwise. Popups (`window.open`, `target=_blank`) are denied as OS windows and reopened as tabs inside the shell. Both behaviors are smoke-checked.
 
