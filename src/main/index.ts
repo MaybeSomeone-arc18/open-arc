@@ -144,7 +144,9 @@ class OpenArcApp {
       backgroundColor: '#17161c',
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
-        sandbox: false
+        // The shell renderer only uses contextBridge + ipcRenderer from the
+        // preload, so the Chromium sandbox can stay on.
+        sandbox: true
       }
     })
     // Downloads: save into the system Downloads folder, toast on completion.
@@ -330,14 +332,7 @@ class OpenArcApp {
         break
       case 'toggle-sidebar':
         this.state.sidebarVisible = !this.state.sidebarVisible
-        // Default-deny every web permission request (camera, mic, notifications,
-    // geolocation, ...). Electron grants them unless a handler says no; a
-    // browser shell must decide deliberately. No prompts exist yet, so deny.
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false)
-    })
-
-    this.tabs.setSidebarVisible(this.state.sidebarVisible)
+        this.tabs.setSidebarVisible(this.state.sidebarVisible)
         this.commit()
         break
       case 'goto-tab': {
@@ -1264,11 +1259,6 @@ class OpenArcApp {
     ipcMain.on('tab:pin', (_e, tabId: string) => this.setPinned(tabId, true))
     ipcMain.on('tab:unpin', (_e, tabId: string) => this.setPinned(tabId, false))
     ipcMain.on('tab:restore', (_e, tabId: string) => this.restoreTab(tabId))
-    ipcMain.on('tab:navigate-to', (_e, url: string) => {
-      const active = this.activeTab()
-      if (active) this.tabs.navigateActiveTo(active.id, normalizeUrl(url))
-    })
-
     ipcMain.handle('find:in-page', (_e, text: string, findNext: boolean) => {
       const active = this.activeTab()
       return active ? this.tabs.findIn(active.id, text, !!findNext) : null

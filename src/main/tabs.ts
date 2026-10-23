@@ -53,7 +53,8 @@ export class TabLayer {
   private ensureView(tab: TabItem): WebContentsView {
     const existing = this.views.get(tab.id)
     if (existing) return existing
-    const view = new WebContentsView()
+    // Tab views load untrusted web content: sandboxed renderers, no preload.
+    const view = new WebContentsView({ webPreferences: { sandbox: true } })
     this.views.set(tab.id, view)
     // Attach listeners BEFORE loadURL: with in-process rendering the
     // load events can dispatch synchronously and would be missed.
