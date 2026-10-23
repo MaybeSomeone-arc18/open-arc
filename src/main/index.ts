@@ -747,14 +747,17 @@ class OpenArcApp {
 
   /** SelfTest teardown: app.exit first; if Electron fails to terminate
    *  (observed intermittently after the report is written), say so loudly
-   *  and fall back to process.exit. The phase result always comes from the
-   *  written report, never from how the process died. */
+   *  and force a DISTINCT failure code (97) so a hung teardown can never
+   *  pass as green. A phase whose checks already failed keeps its nonzero
+   *  code. The check results come from the written report; the exit code
+   *  additionally fails the run whenever the force-exit path was needed. */
   private exitSelfTest(code: number): void {
     console.log(`[openarc] selfTest exiting with code ${code}`)
     app.exit(code)
     setTimeout(() => {
-      console.error(`[openarc] app.exit(${code}) did not terminate the process within 5s; falling back to process.exit`)
-      process.exit(code)
+      const forced = code === 0 ? 97 : code
+      console.error(`[openarc] app.exit(${code}) did not terminate the process within 5s; forcing process.exit(${forced}) - teardown hang: this run FAILED`)
+      process.exit(forced)
     }, 5000).unref()
   }
 
