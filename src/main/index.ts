@@ -152,13 +152,38 @@ class OpenArcApp {
     })
     // Downloads: save into the system Downloads folder, toast on completion.
     this.downloadsDone = []
-    session.defaultSession.on('will-download', (_e, item) => {
+    session.defaultSession.on('will-download', (_e, item, wc) => {
       const savePath = join(app.getPath('downloads'), item.getFilename())
       item.setSavePath(savePath)
       item.once('done', (_ev, st) => {
-        const info = { filename: item.getFilename(), path: savePath, state: st }
+        // Verify the file really landed before telling the user it did.
+        let size: number | undefined
+        try {
+          if (st === 'completed' && fs.existsSync(savePath)) size = fs.statSync(savePath).size
+        } catch { size = undefined }
+        const info = { filename: item.getFilename(), path: savePath, state: st, size }
         this.downloadsDone.push(info)
         if (!this.win.isDestroyed()) this.win.webContents.send('download:done', info)
+        // A tab navigated directly at a binary is left blank once the
+        // navigation turns into a download. Give it an honest, recoverable
+        // status page instead of pretending the binary was a web page.
+        // loadURL (not executeJavaScript): a navigation that became a
+        // download can leave renderer calls hanging.
+        if (wc && !wc.isDestroyed() && (wc.getURL() === '' || wc.getURL() === 'about:blank')) {
+          const esc = (v: string): string => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          const title = st === 'completed' ? 'Download complete' : `Download ${st}`
+          const sizeStr = size !== undefined ? ` (${size} bytes)` : ''
+          const noteHtml =
+            '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title></head>' +
+            '<body style="margin:0;background:#141418;color:#e8e8ea;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">' +
+            '<div class="oa-download-note" style="max-width:520px;text-align:center;padding:32px;">' +
+            '<h1 style="font-size:20px;margin:0 0 12px;">' + esc(title) + '</h1>' +
+            '<div style="font-size:13px;opacity:0.8;word-break:break-all;margin-bottom:12px;">' + esc(item.getFilename() + sizeStr) + '</div>' +
+            '<div style="font-size:13px;opacity:0.55;">Saved to your Downloads folder. This address points to a file, not a web page, so there is nothing to display here.</div>' +
+            '<div style="font-size:12px;opacity:0.45;margin-top:16px;">Close this tab (Ctrl+W) or enter a new address in the sidebar.</div>' +
+            '</div></body></html>'
+          wc.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(noteHtml)).catch(() => {})
+        }
       })
     })
 
@@ -1126,7 +1151,8 @@ class OpenArcApp {
       fs.statSync(pdfPath).size > 1000 &&
       fs.readFileSync(pdfPath).subarray(0, 5).toString() === '%PDF-'
     check('pdf: Ctrl+P saves a real PDF to Downloads', pdfOk, `file=${pdfFile || 'none'} size=${pdfFile ? fs.statSync(pdfPath).size : 0}`)
-    if (pdfFile) fs.rmSync(pdfPath)
+    // Test hygiene: remove the artifact so repeated runs don't pile up PDFs.
+    try { if (pdfFile) fs.unlinkSync(pdfPath) } catch { /* leave artifact */ }
 
     // Reader mode (Ctrl+Alt+R) on the Wikipedia article: overlay appears with
     // the article title, toggles off again. Asserted on the page DOM itself.
@@ -1423,6 +1449,18 @@ class OpenArcApp {
       if (dlOnDisk) unlinkSync(p)
     } catch { /* reported by check below */ }
     check('downloads: file saves to Downloads folder', gotDl && dlOnDisk)
+    // Direct navigation to a file leaves the tab blank once the navigation
+    // becomes a download; it must get an honest, recoverable status page.
+    const noteShown = await pollUntil(() => dlTab.title === 'Download complete', 8000)
+    check('downloads: blank tab shows a recoverable post-download state', noteShown, `title="${dlTab.title}"`)
+    // The completion toast reserves a bottom strip so feedback is never
+    // hidden behind page content (same layering class as the overlays).
+    const [, dlContentH] = this.win.getContentSize()
+    const toastInset = await pollUntil(() => {
+      const b = this.tabs.getTabBounds(dlTab.id)
+      return !!b && b.height === dlContentH - 64
+    }, 5000)
+    check('toast: download feedback reserves a visible strip', toastInset, `bounds=${JSON.stringify(this.tabs.getTabBounds(dlTab.id))} contentH=${dlContentH}`)
     this.closeTab(dlTab.id)
     dlServer.close()
 
@@ -1539,8 +1577,8 @@ class OpenArcApp {
     })
     ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
     ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => this.windowControl(action))
-    ipcMain.on('app:overlay', (_e, modal: boolean, findBar: boolean) => {
-      if (!this.win.isDestroyed()) this.tabs.setOverlayState(!!modal, !!findBar)
+    ipcMain.on('app:overlay', (_e, modal: boolean, findBar: boolean, toast: boolean) => {
+      if (!this.win.isDestroyed()) this.tabs.setOverlayState(!!modal, !!findBar, !!toast)
     })
     ipcMain.on('app:focus', (_e, which: 'shell' | 'page') => {
       if (this.win.isDestroyed()) return

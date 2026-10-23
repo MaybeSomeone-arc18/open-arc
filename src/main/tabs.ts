@@ -47,12 +47,15 @@ export class TabLayer {
    * stay visible, so views shrink to a reserved strip at the top instead. */
   private modalOpen = false
   private findBarOpen = false
+  private toastOpen = false
   private hiddenIds = new Set<string>()
   private static FIND_BAR_INSET = 48
+  private static TOAST_INSET = 64
 
-  setOverlayState(modal: boolean, findBar: boolean): void {
+  setOverlayState(modal: boolean, findBar: boolean, toast: boolean): void {
     this.modalOpen = modal
     this.findBarOpen = findBar
+    this.toastOpen = toast
     this.applyOverlayState()
     this.layout()
   }
@@ -72,12 +75,15 @@ export class TabLayer {
     const x = this.sidebarVisible ? SIDEBAR_WIDTH : 0
     const width = Math.max(0, w - x)
     const top = this.findBarOpen && !this.modalOpen ? TabLayer.FIND_BAR_INSET : 0
+    // Toasts render in the shell DOM at bottom-right; reserve a bottom strip
+    // so feedback is never hidden behind page content.
+    const bottom = this.toastOpen && !this.modalOpen ? TabLayer.TOAST_INSET : 0
     const n = this.attachedIds.length || 1
     this.attachedIds.forEach((id, i) => {
       const view = this.views.get(id)
       if (!view) return
       const paneWidth = Math.floor(width / n)
-      view.setBounds({ x: x + i * paneWidth, y: top, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: Math.max(0, h - top) })
+      view.setBounds({ x: x + i * paneWidth, y: top, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: Math.max(0, h - top - bottom) })
     })
   }
 
@@ -162,7 +168,9 @@ export class TabLayer {
       this.onTabUpdated({ ...tab })
     })
     view.webContents.on('context-menu', (_e, params) => {
-      Menu.buildFromTemplate(buildPageContextMenu(params, view.webContents, (url) => this.onOpenInNewTab(url))).popup()
+      // Scoped to the window (documented for frameless windows): keeps the
+      // native popup tied to this window's event loop and dismissal.
+      Menu.buildFromTemplate(buildPageContextMenu(params, view.webContents, (url) => this.onOpenInNewTab(url))).popup({ window: this.win })
     })
     // Popups (window.open, target=_blank) become tabs in this shell, never OS windows.
     view.webContents.setWindowOpenHandler(({ url }) => {

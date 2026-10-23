@@ -72,7 +72,7 @@ export interface OpenArcApi {
   /** Transient (never persisted): tab page load start/stop. */
   onTabLoading(cb: (tabId: string, loading: boolean) => void): () => void
   /** Transient: a download finished (state: completed | cancelled | interrupted). */
-  onDownloadDone(cb: (info: { filename: string; path: string; state: string }) => void): () => void
+  onDownloadDone(cb: (info: { filename: string; path: string; state: string; size?: number }) => void): () => void
 
   switchSpace(spaceId: string): void
   createSpace(name: string): void
@@ -100,7 +100,7 @@ export interface OpenArcApi {
   focusShell(): void
   focusPage(): void
   /** Shell overlay state, so main can keep tab views from covering them. */
-  setOverlayState(modal: boolean, findBar: boolean): void
+  setOverlayState(modal: boolean, findBar: boolean, toast: boolean): void
   /** App shortcut forwarded by main when a page (WebContentsView) had keyboard focus. */
   onShortcut(cb: (action: ShortcutAction, arg?: string) => void): () => void
 

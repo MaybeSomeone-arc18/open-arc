@@ -14,7 +14,7 @@ const api: OpenArcApi = {
     return () => ipcRenderer.removeListener('tab:loading', listener)
   },
   onDownloadDone: (cb) => {
-    const listener = (_e: Electron.IpcRendererEvent, info: { filename: string; path: string; state: string }): void => cb(info)
+    const listener = (_e: Electron.IpcRendererEvent, info: { filename: string; path: string; state: string; size?: number }): void => cb(info)
     ipcRenderer.on('download:done', listener)
     return () => ipcRenderer.removeListener('download:done', listener)
   },
@@ -43,7 +43,7 @@ const api: OpenArcApi = {
   windowControl: (action) => ipcRenderer.send('window:control', action),
   focusShell: () => ipcRenderer.send('app:focus', 'shell'),
   focusPage: () => ipcRenderer.send('app:focus', 'page'),
-  setOverlayState: (modal, findBar) => ipcRenderer.send('app:overlay', modal, findBar),
+  setOverlayState: (modal, findBar, toast) => ipcRenderer.send('app:overlay', modal, findBar, toast),
   onShortcut: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, action: Parameters<typeof cb>[0], arg?: string): void => cb(action, arg)
     ipcRenderer.on('app:shortcut', listener)

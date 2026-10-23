@@ -38,8 +38,10 @@ The alpha approach is deliberately simple and preserves the live page: opening
 a modal overlay (command bar, shortcuts) hides the attached page views via
 `setVisible(false)` (no unload, no state loss, restored on close); the find
 bar instead shrinks page views below a 48px top strip so the page and match
-highlights stay visible. Keyboard focus follows: opening an overlay focuses
-the shell, closing the last overlay returns focus to the active tab. A
+highlights stay visible. Toasts (downloads, zoom, PDF feedback) reserve a
+64px bottom strip so confirmation/failure feedback is never hidden behind a
+page. Keyboard focus follows: opening an overlay focuses the shell, closing
+the last overlay returns focus to the active tab. A
 dedicated native overlay view may replace this later; the fallback is covered
 by composited-capture verification and lifecycle checks in the smoke suite.
 

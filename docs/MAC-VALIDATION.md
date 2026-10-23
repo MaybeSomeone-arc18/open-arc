@@ -53,8 +53,8 @@ npm run preview    # production build (what CI builds)
 | 6 | Split view | Ctrl+Shift+= then Ctrl+Shift+- | Two tabs side by side, then back |
 | 7 | Find-in-page | Ctrl+F on any page, type a word | Page shifts down under a top strip holding the find bar; matches highlight with a live count (**experimental**: bar+layout verified in composited captures, match event unverified until real hardware) |
 | 8 | Context menu | Right-click a link and an image | Native menu with open/copy items (**experimental**: items verified headless, the popup itself is not) |
-| 9 | Downloads | Download any file | Lands in ~/Downloads with a completion toast |
-| 10 | Save as PDF | Ctrl+P on any page | PDF written to ~/Downloads, opens in Preview |
+| 9 | Downloads | Download any file (and navigate directly to a binary, e.g. https://httpbin.org/bytes/1024) | Lands in ~/Downloads with a completion toast showing filename + size; a direct file navigation shows a 'Download complete' status page, not a blank tab |
+| 10 | Save as PDF | Ctrl+P on any page | Page lifts off a bottom strip showing a 'Saved PDF' toast (or a clear failure toast); PDF written to ~/Downloads, opens in Preview |
 | 11 | Reader mode | Ctrl+Alt+R on an article | Clean reading view; cosmetic leftovers known (orphaned headings possible) |
 | 12 | Per-tab zoom | Ctrl+= / Ctrl+- / Ctrl+0 on one tab | Only that tab zooms; shell UI unaffected |
 | 13 | Session persistence | Open tabs, pin one, quit (Cmd+Q), relaunch | Spaces, pins, tabs, archive, window position all restored |

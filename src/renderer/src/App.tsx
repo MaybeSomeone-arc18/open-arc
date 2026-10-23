@@ -28,8 +28,11 @@ export function App(): JSX.Element {
       })
     }
     const offDownload = window.openArc.onDownloadDone((info) => {
+      const size = info.size !== undefined ? (info.size < 1024 ? `${info.size} B` : `${(info.size / 1024).toFixed(1)} KB`) : null
       setDownloadToast(
-        info.state === 'completed' ? `Downloaded ${info.filename}` : `Download ${info.state}: ${info.filename}`
+        info.state === 'completed'
+          ? `Downloaded ${info.filename}${size ? ` (${size})` : ''}`
+          : `Download ${info.state}: ${info.filename}`
       )
       if (toastTimer) clearTimeout(toastTimer)
       toastTimer = setTimeout(() => setDownloadToast(null), 6000)
@@ -69,10 +72,14 @@ export function App(): JSX.Element {
       }
       if (action === 'view-source') window.openArc.runCommand('view-source')
       if (action === 'print-pdf') {
-        window.openArc.printToPdf().then((path) => {
-          setZoomToast(path ? `Saved PDF: ${path.split('/').pop()}` : 'PDF export failed')
+        const reportPdf = (msg: string): void => {
+          setZoomToast(msg)
           setTimeout(() => setZoomToast(null), 2500)
-        })
+        }
+        window.openArc
+          .printToPdf()
+          .then((path) => reportPdf(path ? `Saved PDF: ${path.split('/').pop()}` : 'PDF export failed'))
+          .catch(() => reportPdf('PDF export failed'))
       }
       if (action === 'reader-toggle') {
         window.openArc.toggleReader().then((res) => {
@@ -131,8 +138,8 @@ export function App(): JSX.Element {
   // Keep main informed so tab views never cover shell overlays: modals hide
   // the page views, the find bar reserves a top strip and keeps pages visible.
   useEffect(() => {
-    window.openArc.setOverlayState(commandBarOpen || shortcutsOpen, findBarOpen)
-  }, [commandBarOpen, shortcutsOpen, findBarOpen])
+    window.openArc.setOverlayState(commandBarOpen || shortcutsOpen, findBarOpen, downloadToast !== null || zoomToast !== null)
+  }, [commandBarOpen, shortcutsOpen, findBarOpen, downloadToast, zoomToast])
 
   const closeCommandBar = useCallback(() => {
     setCommandBarOpen(false)
