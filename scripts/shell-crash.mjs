@@ -4,11 +4,12 @@
  * starts its own Xvfb and answers the REAL native dialog with xdotool.
  * Needs `npm run build` first. Separate profile, separate from the smoke suite.
  *   scenario reload: crash, auto-reload, crash again -> dialog -> Return (Reload) -> shell responds
+ *   scenario failsave: state dir made read-only so the flush really fails -> dialog must say it could not save -> Escape (Quit) still exits 0, old state.json untouched
  *   scenario quit:   crash, auto-reload, crash again -> dialog -> Escape (Quit)   -> app exits, state on disk
  * Writes the dialog screenshot to $OPEN_ARC_CRASH_SHOT (default: tmp).
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, existsSync, copyFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync, copyFileSync, chmodSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,6 +31,7 @@ async function scenario(kind, display) {
   let exited = null
   p.on('exit', (c) => { exited = c ?? 1 })
   const prog = join(outDir, 'report-shellcrash-progress.json')
+  let beforeBytes = null
   const t0 = Date.now()
   while (!existsSync(prog) && exited === null && Date.now() - t0 < 60000) await sleep(250)
   say(existsSync(prog), `[${kind}] harness reached the repeat crash and the dialog is expected`)
@@ -42,11 +44,22 @@ async function scenario(kind, display) {
     const tree = spawnSync('xwininfo', ['-display', display, '-root', '-tree'], { encoding: 'utf8' }).stdout || ''
     const wins = tree.split('\n').filter((l) => /\d+x\d+\+/.test(l))
     console.log(`[${kind}] named X windows while dialog open:\n` + wins.slice(0, 12).join('\n'))
-    spawnSync('xdotool', ['key', kind === 'quit' ? 'Escape' : 'Return'], { env })
+    if (kind === 'failsave') {
+      for (const c of JSON.parse(readFileSync(prog, 'utf8')).checks) say(c.pass, c.name, c.detail || '')
+      beforeBytes = readFileSync(join(profile, 'open-arc', 'state.json'), 'utf8')
+    }
+    spawnSync('xdotool', ['key', kind === 'reload' ? 'Return' : 'Escape'], { env })
   }
   const t1 = Date.now()
   while (exited === null && Date.now() - t1 < 45000) await sleep(250)
-  if (kind === 'quit') {
+  if (kind === 'failsave') {
+    try { chmodSync(join(profile, 'open-arc'), 0o755) } catch { /* cleanup */ }
+    say(exited === 0, '[failsave] Quit with a failing disk still closes the app (no unhandled before-quit throw)', `exit=${exited}`)
+    let after = null
+    try { after = readFileSync(join(profile, 'open-arc', 'state.json'), 'utf8') } catch { /* below */ }
+    say(after !== null && after === beforeBytes, '[failsave] previously saved state.json is byte-identical (old copy preserved)')
+    say(!readdirSync(join(profile, 'open-arc')).some((f) => f.endsWith('.tmp')), '[failsave] no partial temp file left behind')
+  } else if (kind === 'quit') {
     say(exited === 0, '[quit] Escape (Quit) closed the app', `exit=${exited}`)
     const sf = join(profile, 'open-arc', 'state.json')
     let ok = false
@@ -68,5 +81,6 @@ await sleep(1500)
 try {
   await scenario('reload', display)
   await scenario('quit', display)
+  await scenario('failsave', display)
 } finally { xvfb.kill() }
 process.exit(overall ? 0 : 1)

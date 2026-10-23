@@ -209,12 +209,14 @@ class OpenArcApp {
       // the latest change); in-flight page state is not durable and is lost.
       if (this.crashDialogOpen) return
       this.crashDialogOpen = true
-      try { this.store.flush(this.state) } catch { /* best effort */ }
+      const saved = this.flushStateSafely()
       void dialog
         .showMessageBox(this.win, {
           type: 'error',
           message: 'Open Arc\u2019s window crashed twice in a row.',
-          detail: 'Your spaces and tabs were saved. Reload to try again, or quit and reopen Open Arc.',
+          detail: (this.lastCrashDialogDetail = saved
+            ? 'Your spaces and tabs were saved. Reload to try again, or quit and reopen Open Arc.'
+            : 'Open Arc could not save your latest changes (the disk write failed). The last saved copy is kept, but recent changes may be lost. Reload to try again, or quit and reopen Open Arc.'),
           buttons: ['Reload', 'Quit'],
           defaultId: 0,
           cancelId: 1,
@@ -240,7 +242,7 @@ class OpenArcApp {
     this.registerIpc()
     this.startArchiver()
     setTimeout(() => this.archiveIdle(false), 5000)
-    app.on('before-quit', () => this.store.flush(this.state))
+    app.on('before-quit', () => { this.flushStateSafely() })
   }
 
   // ---- Auto-archive: idle unpinned tabs move to the space's archive ----
@@ -537,6 +539,17 @@ class OpenArcApp {
    */
   private shellCrashRan = false
   private crashDialogOpen = false
+  lastCrashDialogDetail = ''
+  /** Persist state without ever throwing; false means the write failed and the previous copy on disk is untouched. */
+  private flushStateSafely(): boolean {
+    try {
+      this.store.flush(this.state)
+      return true
+    } catch (err) {
+      console.log(`[openarc] state flush failed: ${(err as Error).message}`)
+      return false
+    }
+  }
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
     if (!dir) return
@@ -583,11 +596,27 @@ class OpenArcApp {
       // Second crash inside the gate: the real native dialog must appear. An
       // external driver (scripts/shell-crash.mjs) answers it; Reload -> the
       // shell loads again and responds, Quit -> the process exits.
+      let restoreMode: (() => void) | null = null
+      if (process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'failsave') {
+        // Real failure condition: make the state directory read-only so the
+        // flush's temp-file write fails with EACCES. Restored by the driver.
+        await wait(1000) // let any debounced save from the reload finish first
+        const sdir = join(app.getPath('userData'), 'open-arc')
+        fs.chmodSync(sdir, 0o555)
+        restoreMode = () => fs.chmodSync(sdir, 0o755)
+        let denied = false
+        try { fs.writeFileSync(join(sdir, 'probe.tmp'), 'x') } catch { denied = true }
+        check('failsave: state directory writes really fail (EACCES)', denied)
+      }
       this.win.webContents.forcefullyCrashRenderer()
       await wait(1500)
+      if (process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'failsave') {
+        check('failsave: dialog does NOT claim the state was saved', /could not save/.test(this.lastCrashDialogDetail) && !/were saved/.test(this.lastCrashDialogDetail), this.lastCrashDialogDetail.slice(0, 60))
+        void restoreMode
+      }
       check('shell crash: repeat crash is NOT silently auto-reloaded (loads still 1 while dialog is open)', loads === 1, `loads=${loads}`)
       writeFileSync(`${dir}/report-shellcrash-progress.json`, JSON.stringify({ phase: 'dialog-open', checks }))
-      if (process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'quit') {
+      if (process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'quit' || process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'failsave') {
         await wait(20000) // the driver answers Quit; the app exits before this returns
         check('shell crash: Quit was not chosen (timeout)', false)
       } else {
