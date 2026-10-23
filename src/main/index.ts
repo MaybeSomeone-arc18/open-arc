@@ -986,6 +986,58 @@ class OpenArcApp {
       `page saw ${JSON.stringify(pageSawPlain)} bar=${barAfterTyping}`
     )
 
+    // Overlay lifecycle: the modal/find overlay layer must survive tab
+    // switches and split view without hiding the wrong thing or stranding
+    // the user with no visible page.
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
+    )
+    const modalHidPage = await pollUntil(() => this.tabs.isTabVisible(exampleTab.id) === false, 5000)
+    check('overlay: modal hides the active page view', modalHidPage)
+    // Switch tab while the modal is open: the newly attached view hides too.
+    this.switchTab(wikiTab.id)
+    const newAlsoHidden = await pollUntil(() => this.tabs.isTabVisible(wikiTab.id) === false, 5000)
+    check('overlay: tab switch under modal keeps the new page hidden', newAlsoHidden)
+    // Close the modal: the CURRENT tab becomes visible again (no stranded page).
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    const pageRestored = await pollUntil(() => this.tabs.isTabVisible(wikiTab.id) === true, 5000)
+    check('overlay: closing modal restores the current page', pageRestored)
+    this.switchTab(exampleTab.id)
+    await wait(500)
+    // Find bar: the page shrinks below the 48px top strip, staying visible.
+    const [, contentH] = this.win.getContentSize()
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}))"
+    )
+    const findInset = await pollUntil(() => {
+      const b = this.tabs.getTabBounds(exampleTab.id)
+      return !!b && b.y === 48 && b.height === contentH - 48
+    }, 5000)
+    check('overlay: find bar insets page below a top strip', findInset, `bounds=${JSON.stringify(this.tabs.getTabBounds(exampleTab.id))} contentH=${contentH}`)
+    // Split view while the find bar is open: both panes respect the strip.
+    this.runCommand('split-view')
+    const splitInset = await pollUntil(() => {
+      const spId = this.activeSpace().splitTabId
+      if (!spId) return false
+      const pb = this.tabs.getTabBounds(this.activeSpace().activeTabId!)
+      const sb = this.tabs.getTabBounds(spId)
+      return !!pb && !!sb && pb.y === 48 && sb.y === 48 && pb.height === contentH - 48 && sb.height === contentH - 48
+    }, 5000)
+    check('overlay: split panes respect the find-bar strip', splitInset)
+    this.runCommand('close-split')
+    await wait(500)
+    // Close the find bar: the page returns to full height.
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    const fullAgain = await pollUntil(() => {
+      const b = this.tabs.getTabBounds(exampleTab.id)
+      return !!b && b.y === 0 && b.height === contentH
+    }, 5000)
+    check('overlay: closing find bar restores full-height page', fullAgain, `bounds=${JSON.stringify(this.tabs.getTabBounds(exampleTab.id))}`)
+
     // Popups become tabs: window.open on the page opens a tab in this shell
     this.switchTab(exampleTab.id)
     const beforePop = new Set([...this.activeSpace().pinned, ...this.activeSpace().today].map((t) => t.id))

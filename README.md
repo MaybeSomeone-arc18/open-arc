@@ -30,6 +30,19 @@ Early proof of concept. What genuinely works today (verified by automated runs w
 
 Honest gaps: no sync, no accounts, no extensions, no download manager UI (files save to the Downloads folder with a completion toast), no dedicated history page (history is searchable from the command bar), single window only. This is a PoC of the product experience, not a daily driver yet.
 
+### Overlay layering (alpha fallback)
+
+Electron's `WebContentsView` pages composite **above** the shell's DOM, so the
+command bar, find bar and shortcuts overlay cannot simply float over a page.
+The alpha approach is deliberately simple and preserves the live page: opening
+a modal overlay (command bar, shortcuts) hides the attached page views via
+`setVisible(false)` (no unload, no state loss, restored on close); the find
+bar instead shrinks page views below a 48px top strip so the page and match
+highlights stay visible. Keyboard focus follows: opening an overlay focuses
+the shell, closing the last overlay returns focus to the active tab. A
+dedicated native overlay view may replace this later; the fallback is covered
+by composited-capture verification and lifecycle checks in the smoke suite.
+
 ### Known limitations
 
 - **Window drag is untested end-to-end.** The drag region is implemented with CSS `-webkit-app-region: drag` on the sidebar/top bar, and minimize / maximize / close are exercised in the automated verification runs, but the runs are headless (Xvfb), so pointer-dragging the window has not been verified in an automated run. It should work on a real desktop; treat it as unverified until someone drags it on a physical machine.

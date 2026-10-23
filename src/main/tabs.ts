@@ -47,6 +47,7 @@ export class TabLayer {
    * stay visible, so views shrink to a reserved strip at the top instead. */
   private modalOpen = false
   private findBarOpen = false
+  private hiddenIds = new Set<string>()
   private static FIND_BAR_INSET = 48
 
   setOverlayState(modal: boolean, findBar: boolean): void {
@@ -59,7 +60,10 @@ export class TabLayer {
   private applyOverlayState(): void {
     for (const id of this.attachedIds) {
       const view = this.views.get(id)
-      if (view && this.win.contentView.children.includes(view)) view.setVisible(!this.modalOpen)
+      if (!view || !this.win.contentView.children.includes(view)) continue
+      view.setVisible(!this.modalOpen)
+      if (this.modalOpen) this.hiddenIds.add(id)
+      else this.hiddenIds.delete(id)
     }
   }
 
@@ -195,10 +199,21 @@ export class TabLayer {
       if (!this.win.contentView.children.includes(view)) {
         this.win.contentView.addChildView(view)
       }
-      if (this.modalOpen) view.setVisible(false)
+      if (this.modalOpen) { view.setVisible(false); this.hiddenIds.add(tab.id) }
       if (!this.attachedIds.includes(tab.id)) this.attachedIds.push(tab.id)
     }
     this.layout()
+  }
+
+  /** Test/debug seam: is this tab's view attached AND visible (not hidden by a modal overlay)? */
+  isTabVisible(tabId: string): boolean {
+    const view = this.views.get(tabId)
+    return !!view && this.win.contentView.children.includes(view) && !this.hiddenIds.has(tabId)
+  }
+
+  /** Test/debug seam: current bounds of a tab's view (overlay insets shift these). */
+  getTabBounds(tabId: string): Rectangle | null {
+    return this.views.get(tabId)?.getBounds() ?? null
   }
 
   focusTab(tabId: string): void {
