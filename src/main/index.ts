@@ -1888,6 +1888,9 @@ class OpenArcApp {
       return result
     }
     const result = this.store.declineRecovery()
+    // Persist the current (declining) state once: the debounced save was
+    // held while the choice was pending, so nothing is on disk yet.
+    if (result.ok) this.commit()
     if (!this.win.isDestroyed()) this.win.webContents.send('state:recovery-result', { ok: result.ok, accepted: false, error: result.error })
     return result
   }
