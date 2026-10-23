@@ -106,7 +106,7 @@ Electron was upgraded from 33.4.11 (EOL, 6 open advisories including an ASAR int
 
 Browser-shell hardening: every web permission request (camera, mic, notifications, geolocation, ...) is default-denied until a consent UI exists - Electron grants them by default otherwise. Popups (`window.open`, `target=_blank`) are denied as OS windows and reopened as tabs inside the shell. Both behaviors are smoke-checked.
 
-Runtime dependencies shipped to the app (`react`, `react-dom`) have no known advisories at audit time. Re-run `npm audit` before any packaged release; no packaged build should be distributed until the remaining dev-tooling advisories are re-checked at that time.
+Note on framing: `electron` is listed under devDependencies (electron-vite convention), but it IS the shipped browser runtime the moment the app is packaged - npm's runtime-dependency count is not the browser's security surface. At audit time electron@44.9.3 has no open advisories, and the UI libraries bundled into the app (`react`, `react-dom`) have none either. The repo deliberately has **no packaging configured** (no electron-builder/forge), so nothing is distributed today; do not package or distribute a build until the remaining dev-tooling advisories are re-checked and packaging is set up deliberately.
 
 ## License
 
