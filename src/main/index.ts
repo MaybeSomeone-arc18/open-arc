@@ -198,6 +198,9 @@ class OpenArcApp {
     this.store.onSaveError = (saveErr) => {
       if (!this.win.isDestroyed()) this.win.webContents.send('state:save-failed', saveErr)
     }
+    // Best-effort retry of recovery bookkeeping/retirement suppressed at
+    // discovery; never blocks boot, never loses a file.
+    this.store.housekeeping()
     this.registerIpc()
     this.startArchiver()
     setTimeout(() => this.archiveIdle(false), 5000)
@@ -272,6 +275,10 @@ class OpenArcApp {
       if (this.store.quarantinedTo && !this.win.isDestroyed()) {
         this.win.webContents.send('state:recovered', this.store.quarantinedTo)
       }
+      const pendingOffer = this.store.getRecoveryOffer()
+      if (pendingOffer && !this.win.isDestroyed()) this.win.webContents.send('state:recovery-offer', pendingOffer)
+      const malformedNotice = this.store.getMalformedNotice()
+      if (malformedNotice && !this.win.isDestroyed()) this.win.webContents.send('state:recovery-malformed', malformedNotice)
       void this.selfTest()
     })
 
@@ -1755,9 +1762,27 @@ class OpenArcApp {
     if (action === 'close') this.win.close()
   }
 
+  /** Recovery choice from the dialog (or the selfTest harness). */
+  private applyRecoveryChoice(accept: boolean): { ok: boolean; error?: string; warning?: string } {
+    if (accept) {
+      const result = this.store.acceptRecovery()
+      if (result.ok && result.state) {
+        this.state = migrate(result.state)
+        this.commit()
+      }
+      if (!this.win.isDestroyed()) this.win.webContents.send('state:recovery-result', { ok: result.ok, accepted: result.ok, error: result.error, warning: result.warning })
+      return result
+    }
+    const result = this.store.declineRecovery()
+    if (!this.win.isDestroyed()) this.win.webContents.send('state:recovery-result', { ok: result.ok, accepted: false, error: result.error })
+    return result
+  }
+
   private registerIpc(): void {
     ipcMain.handle('state:get', () => this.state)
     ipcMain.handle('commands:list', () => COMMANDS)
+    ipcMain.on('state:recovery-choice', (_e, accept: boolean) => this.applyRecoveryChoice(accept === true))
+    ipcMain.on('state:recovery-malformed-choice', (_e, keep: boolean) => { this.store.dismissMalformed(keep === true) })
 
     ipcMain.on('space:switch', (_e, spaceId: string) => {
       if (this.state.spaces.some((s) => s.id === spaceId)) {

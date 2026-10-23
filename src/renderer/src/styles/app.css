@@ -193,3 +193,31 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 .command-rows::-webkit-scrollbar { width: 8px; }
 .command-rows::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
 .command-rows::-webkit-scrollbar-track { background: transparent; }
+
+.recovery-dialog {
+  position: fixed;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  max-width: 520px;
+  background: #1e1e24;
+  border: 1px solid #3a3a44;
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: #e8e8ec;
+  z-index: 60;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+.recovery-title { font-weight: 600; margin-bottom: 6px; }
+.recovery-body { font-size: 13px; line-height: 1.45; color: #c6c6cf; }
+.recovery-actions { display: flex; gap: 8px; margin-top: 10px; }
+.recovery-actions button {
+  background: #2c2c34;
+  color: #e8e8ec;
+  border: 1px solid #46464f;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.recovery-actions button:hover:not(:disabled) { background: #38383f; }
+.recovery-actions button:disabled { opacity: 0.5; cursor: default; }

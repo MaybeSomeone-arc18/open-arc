@@ -28,6 +28,23 @@ const api: OpenArcApi = {
     ipcRenderer.on('state:save-failed', listener)
     return () => ipcRenderer.removeListener('state:save-failed', listener)
   },
+  onRecoveryOffer: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, info: import('../shared/types').RecoveryOfferInfo): void => cb(info)
+    ipcRenderer.on('state:recovery-offer', listener)
+    return () => ipcRenderer.removeListener('state:recovery-offer', listener)
+  },
+  onRecoveryMalformed: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, notice: import('../shared/types').RecoveryMalformedNotice): void => cb(notice)
+    ipcRenderer.on('state:recovery-malformed', listener)
+    return () => ipcRenderer.removeListener('state:recovery-malformed', listener)
+  },
+  onRecoveryResult: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, result: import('../shared/types').RecoveryResult): void => cb(result)
+    ipcRenderer.on('state:recovery-result', listener)
+    return () => ipcRenderer.removeListener('state:recovery-result', listener)
+  },
+  chooseRecovery: (accept) => ipcRenderer.send('state:recovery-choice', accept),
+  dismissRecoveryMalformed: (keep) => ipcRenderer.send('state:recovery-malformed-choice', keep),
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),

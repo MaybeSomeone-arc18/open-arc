@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppState } from '../../shared/types'
+import type { AppState, RecoveryMalformedNotice, RecoveryOfferInfo } from '../../shared/types'
 import { matchShortcut, type ShortcutAction } from '../../shared/shortcuts'
 import { Sidebar } from './components/Sidebar'
 import { CommandBar } from './components/CommandBar'
@@ -14,6 +14,9 @@ export function App(): JSX.Element {
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set())
   const [downloadToast, setDownloadToast] = useState<string | null>(null)
   const [zoomToast, setZoomToast] = useState<string | null>(null)
+  const [recoveryOffer, setRecoveryOffer] = useState<RecoveryOfferInfo | null>(null)
+  const [recoveryNotice, setRecoveryNotice] = useState<RecoveryMalformedNotice | null>(null)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
 
   useEffect(() => {
     window.openArc.getState().then(setState)
@@ -34,6 +37,9 @@ export function App(): JSX.Element {
           ? `Downloaded ${info.filename}${size ? ` (${size})` : ''}`
           : `Download ${info.state}: ${info.filename}`
       )
+      offRecoveryOffer()
+      offRecoveryMalformed()
+      offRecoveryResult()
       if (toastTimer) clearTimeout(toastTimer)
       toastTimer = setTimeout(() => setDownloadToast(null), 6000)
     })
@@ -41,6 +47,19 @@ export function App(): JSX.Element {
       setDownloadToast('Saved data was unreadable - the original was backed up and Open Arc started fresh')
       if (toastTimer) clearTimeout(toastTimer)
       toastTimer = setTimeout(() => setDownloadToast(null), 8000)
+    })
+    const offRecoveryOffer = window.openArc.onRecoveryOffer((info) => { setRecoveryBusy(false); setRecoveryOffer(info) })
+    const offRecoveryMalformed = window.openArc.onRecoveryMalformed((notice) => setRecoveryNotice(notice))
+    const offRecoveryResult = window.openArc.onRecoveryResult((result) => {
+      setRecoveryBusy(false)
+      if (result.ok) {
+        setRecoveryOffer(null)
+        setDownloadToast(result.accepted
+          ? `Recovered your saved work${result.warning ? ` (warning: ${result.warning})` : ''}`
+          : 'Started fresh - the recovery file was kept on disk')
+      } else {
+        setDownloadToast(result.error ?? 'Recovery failed')
+      }
     })
     const offSaveFailed = window.openArc.onSaveFailed(() => {
       setDownloadToast("Couldn't save latest changes - will retry on the next change")
@@ -150,8 +169,8 @@ export function App(): JSX.Element {
   // Keep main informed so tab views never cover shell overlays: modals hide
   // the page views, the find bar reserves a top strip and keeps pages visible.
   useEffect(() => {
-    window.openArc.setOverlayState(commandBarOpen || shortcutsOpen, findBarOpen, downloadToast !== null || zoomToast !== null)
-  }, [commandBarOpen, shortcutsOpen, findBarOpen, downloadToast, zoomToast])
+    window.openArc.setOverlayState(commandBarOpen || shortcutsOpen || recoveryOffer !== null || recoveryNotice !== null, findBarOpen, downloadToast !== null || zoomToast !== null)
+  }, [commandBarOpen, shortcutsOpen, findBarOpen, downloadToast, zoomToast, recoveryOffer, recoveryNotice])
 
   const closeCommandBar = useCallback(() => {
     setCommandBarOpen(false)
@@ -167,6 +186,37 @@ export function App(): JSX.Element {
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
       {findBarOpen && <FindBar onClose={() => { setFindBarOpen(false); window.openArc.focusPage() }} />}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => { setShortcutsOpen(false); window.openArc.focusPage() }} />}
+      {recoveryOffer && (
+        <div className="recovery-dialog">
+          <div className="recovery-title">Recover saved work?</div>
+          <div className="recovery-body">
+            A previous session saved work to a recovery file ({recoveryOffer.candidateName}, {recoveryOffer.candidateTimestamp}):
+            {' '}{recoveryOffer.spaceCount} space(s){recoveryOffer.spaceNames.length ? ` - ${recoveryOffer.spaceNames.join(', ')}` : ''}.
+            {recoveryOffer.currentValid
+              ? ` Your current state (saved ${recoveryOffer.currentTimestamp ?? 'unknown'}) is kept as a backup either way.`
+              : ' The normal saved state could not be read; it stays untouched until you decide.'}
+            {' '}This may be work you already recovered or an older snapshot - compare the dates before choosing.
+            {(recoveryOffer.otherNames.length + recoveryOffer.malformedNames.length) > 0 &&
+              ` Also kept on disk: ${[...recoveryOffer.otherNames, ...recoveryOffer.malformedNames].join(', ')}`}
+          </div>
+          <div className="recovery-actions">
+            <button disabled={recoveryBusy} onClick={() => { setRecoveryBusy(true); window.openArc.chooseRecovery(true) }}>Recover this work</button>
+            <button disabled={recoveryBusy} onClick={() => { setRecoveryBusy(true); window.openArc.chooseRecovery(false) }}>{recoveryOffer.currentValid ? 'Keep current state' : 'Start fresh'}</button>
+          </div>
+        </div>
+      )}
+      {recoveryNotice && !recoveryOffer && (
+        <div className="recovery-dialog">
+          <div className="recovery-title">Damaged recovery file found</div>
+          <div className="recovery-body">
+            Could not read: {recoveryNotice.names.join(', ')}. The file(s) stay on disk untouched.
+          </div>
+          <div className="recovery-actions">
+            <button onClick={() => { window.openArc.dismissRecoveryMalformed(true); setRecoveryNotice(null) }}>Decide later</button>
+            <button onClick={() => { window.openArc.dismissRecoveryMalformed(false); setRecoveryNotice(null) }}>Keep files, don't ask again</button>
+          </div>
+        </div>
+      )}
       {downloadToast && <div className="download-toast">{downloadToast}</div>}
       {zoomToast && <div className="download-toast">{zoomToast}</div>}
       {!state.sidebarVisible && (
