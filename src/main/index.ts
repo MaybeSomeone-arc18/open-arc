@@ -898,7 +898,7 @@ class OpenArcApp {
       return
     }
 
-    if (process.env.OPEN_ARC_PHASE?.startsWith('fresh') || process.env.OPEN_ARC_PHASE === 'renamefail') {
+    if (process.env.OPEN_ARC_PHASE?.startsWith('fresh') || process.env.OPEN_ARC_PHASE === 'renamefail' || process.env.OPEN_ARC_PHASE === 'quarclobber') {
       // .fresh restart-recovery phases: the runner planted each profile
       // BEFORE launch. Choices are driven through applyRecoveryChoice - the
       // exact path the dialog's buttons use.
@@ -998,6 +998,12 @@ class OpenArcApp {
         check('freshinterrupted: leftover recognized as committed in the log', logText.includes(F3) && logText.includes('"accepted"'), logText || '(empty)')
         const res = this.applyRecoveryChoice(true)
         check('freshinterrupted: accepting the different candidate commits', res.ok && (read('state.json') ?? '').includes('Other Space'), res.error ?? '')
+      } else if (phase === 'quarclobber') {
+        // An older backup FILE already sits at the deterministic name: the
+        // quarantine must pick a fresh name, never clobber it.
+        check('quarclobber: quarantined despite existing backup file', this.store.quarantinedTo !== null, `quarantinedTo=${this.store.quarantinedTo}`)
+        check('quarclobber: existing backup byte-intact, not clobbered', read('state.json.corrupt-2026-10-23T06-00-00-000Z') === 'older backup sentinel', files().join(','))
+        check('quarclobber: unreadable original quarantined to a fresh name', read('state.json.corrupt-2026-10-23T06-00-00-000Z-2') === 'clobber garbage', files().join(','))
       } else if (phase === 'renamefail') {
         check('renamefail: quarantine rename failed in a WRITABLE dir (injected)', this.store.quarantinedTo === null)
         check('renamefail: no recovery offer without candidates', this.store.getRecoveryOffer() === null)

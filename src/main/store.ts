@@ -192,10 +192,12 @@ export class StateStore {
   }
 
   private quarantineUnreadable(statePath: string, err: unknown): void {
-    // Deterministic stamped name (pre-existing behavior): ms-precision ISO
-    // makes collisions a theoretical edge; tests rely on the exact name.
-    const backup = `${statePath}.corrupt-${stamp()}`
+    // Deterministic stamped name; collision-safe against an existing FILE
+    // (an older backup is never clobbered). A DIRECTORY at the plain name
+    // is the test-injected EISDIR fault and must reach the rename unchanged.
+    let backup = `${statePath}.corrupt-${stamp()}`
     try {
+      if (existsSync(backup) && statSync(backup).isFile()) backup = this.uniquePath(backup)
       renameSync(statePath, backup)
       this.quarantinedTo = backup
       console.warn(`[openarc] saved state unreadable (${String(err)}); original moved to ${backup}; starting fresh`)

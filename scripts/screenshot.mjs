@@ -168,11 +168,15 @@ const renamefailCode = await launchFresh('renamefail', (d) => {
   writeFileSync(join(d, 'state.json'), 'rename fail garbage')
   mkdirSync(join(d, `state.json.corrupt-${FIXED_STAMP}`)) // DIRECTORY: quarantine rename fails EISDIR in a WRITABLE dir
 }, { OPEN_ARC_FIXED_NOW: FIXED_NOW }, freshInterruptedCode)
+const quarclobberCode = await launchFresh('quarclobber', (d) => {
+  writeFileSync(join(d, 'state.json'), 'clobber garbage')
+  writeFileSync(join(d, `state.json.corrupt-${FIXED_STAMP}`), 'older backup sentinel') // existing backup FILE: must not be clobbered
+}, { OPEN_ARC_FIXED_NOW: FIXED_NOW }, renamefailCode)
 
 rmSync(profile, { recursive: true, force: true })
 
-let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || freshAcceptCode !== 0 || freshRejectCode !== 0 || freshMalformedCode !== 0 || freshWritefailCode !== 0 || freshInterruptedCode !== 0 || renamefailCode !== 0 || !preserved
-for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json', 'report-freshaccept.json', 'report-freshreject.json', 'report-freshmalformed.json', 'report-freshwritefail.json', 'report-freshinterrupted.json', 'report-renamefail.json']) {
+let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || freshAcceptCode !== 0 || freshRejectCode !== 0 || freshMalformedCode !== 0 || freshWritefailCode !== 0 || freshInterruptedCode !== 0 || renamefailCode !== 0 || quarclobberCode !== 0 || !preserved
+for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json', 'report-freshaccept.json', 'report-freshreject.json', 'report-freshmalformed.json', 'report-freshwritefail.json', 'report-freshinterrupted.json', 'report-renamefail.json', 'report-quarclobber.json']) {
   const r = report(file)
   if (!r) { console.error(`[smoke] missing ${file}`); failed = true; continue }
   for (const c of r.checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)
