@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppState } from '../shared/types'
 
@@ -21,22 +21,11 @@ export class StateStore {
     try {
       if (!existsSync(this.file)) return null
       const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as AppState
-      if (!Array.isArray(parsed.spaces) || parsed.spaces.length === 0) {
-        this.quarantine()
-        return null
-      }
+      if (!Array.isArray(parsed.spaces) || parsed.spaces.length === 0) return null
       return parsed
     } catch {
-      this.quarantine()
       return null
     }
-  }
-
-  /** Unreadable state is kept aside (never silently overwritten by the next save). */
-  private quarantine(): void {
-    try {
-      if (existsSync(this.file)) copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}`)
-    } catch { /* best effort */ }
   }
 
   /** Debounced save: rapid tab churn coalesces into one write. */

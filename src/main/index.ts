@@ -1306,27 +1306,16 @@ class OpenArcApp {
       wcOf()?.forcefullyCrashRenderer()
       const shown = await pollUntil(async () => this.tabs.crashEvents.some((e) => e.includes(':page:')) && wcOf()?.getTitle() === 'This page crashed', 10000)
       check('crash: repeat crash shows crashed page (no loop)', shown, this.tabs.crashEvents.join(','))
+      try {
+        const img = await wcOf()?.capturePage()
+        if (img) writeFileSync(`${dir}/10-crashed-page.png`, img.toPNG())
+      } catch { /* capture is evidence only */ }
       this.tabs.navigate(ct.id, 'reload')
       const back = await pollUntil(titleIs('crash-target'), 10000)
       check('crash: reload from crashed page restores the original URL', back)
       check('crash: app state intact after crashes', this.state.spaces.length >= 1 && !!this.activeTab())
       this.closeTab(ct.id)
       crashSrv.close()
-    }
-
-    // Corrupt state on disk is quarantined, not silently overwritten.
-    {
-      const sdir = join(app.getPath('userData'), 'open-arc')
-      const sfile = join(sdir, 'state.json')
-      const before = fs.readdirSync(sdir).filter((f) => f.includes('.corrupt-')).length
-      const keep = fs.readFileSync(sfile, 'utf8')
-      fs.writeFileSync(sfile, '{"spaces": [ truncated')
-      const loaded = new StateStore().load()
-      const files = fs.readdirSync(sdir).filter((f) => f.includes('.corrupt-'))
-      const saved = files.length > before && fs.readFileSync(join(sdir, files[files.length - 1]), 'utf8').includes('truncated')
-      fs.writeFileSync(sfile, keep)
-      for (const f of files) fs.unlinkSync(join(sdir, f))
-      check('store: malformed state.json returns null AND is preserved aside', loaded === null && saved)
     }
 
     // Window bounds persistence: set a distinctive size; the verify phase
