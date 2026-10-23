@@ -586,6 +586,97 @@ class OpenArcApp {
       await capture('overlay-5-restored')
       facts.pageFocusedAtEnd = wc.isFocused()
       facts.overlayCountAtEnd = await shellJs("document.querySelectorAll('.command-bar,.find-bar,.shortcuts-overlay').length")
+
+      // ---- PDF path: real key into the FOCUSED PAGE (not the shell) must
+      // route to the print handler, write a real PDF, and show a visible
+      // toast above the painted page. ----
+      this.tabs.focusTab(tab.id)
+      await wait(400)
+      const dlHome = join(app.getPath('home'), 'Downloads')
+      fs.mkdirSync(dlHome, { recursive: true })
+      const pdfsBefore = new Set(fs.readdirSync(dlHome).filter((f) => f.endsWith('.pdf')))
+      wc.sendInputEvent({ type: 'keyDown', keyCode: 'p', modifiers: ['control'] })
+      let pdfFile = ''
+      const pEnd = Date.now() + 12000
+      while (!pdfFile && Date.now() < pEnd) {
+        await wait(250)
+        const now = fs.readdirSync(dlHome).filter((f) => f.endsWith('.pdf') && !pdfsBefore.has(f))
+        if (now.length > 0) pdfFile = now[0]
+      }
+      if (pdfFile) {
+        const pdfPath = join(dlHome, pdfFile)
+        const buf = fs.readFileSync(pdfPath)
+        facts.pdfEvidence = { file: pdfFile, size: buf.length, magic: buf.subarray(0, 5).toString() }
+        await wait(600) // let the toast render into the bottom strip
+        await capture('pdf-1-toast-above-page')
+        facts.pdfToastStripBounds = this.tabs.getTabBounds(tab.id)
+        fs.unlinkSync(pdfPath) // test hygiene: no artifact pile-up
+      } else {
+        facts.pdfEvidence = 'NO FILE WRITTEN'
+        await capture('pdf-1-toast-above-page')
+      }
+
+      // ---- Direct download: blank tab must become a painted status page;
+      // file bytes verified on disk separately from the notification. ----
+      const { createServer } = await import('node:http')
+      const dlServer = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="oa-verify.bin"' })
+        res.end(Buffer.from('open-arc download verify 0123456789'))
+      })
+      await new Promise<void>((r) => dlServer.listen(0, '127.0.0.1', r))
+      const dlPort = (dlServer.address() as { port: number }).port
+      this.openTab(`http://127.0.0.1:${dlPort}/file`)
+      const dlTab = this.activeTab()!
+      const dlEnd = Date.now() + 12000
+      while (dlTab.title !== 'Download complete' && Date.now() < dlEnd) await wait(250)
+      await wait(800) // paint + toast
+      await capture('download-1-status-page')
+      const binPath = join(app.getPath('downloads'), 'oa-verify.bin')
+      try {
+        const buf = fs.readFileSync(binPath)
+        facts.downloadEvidence = { file: 'oa-verify.bin', size: buf.length, contentMatch: buf.toString('utf8') === 'open-arc download verify 0123456789' }
+        fs.unlinkSync(binPath)
+      } catch (e) {
+        facts.downloadEvidence = 'READ FAILED: ' + String(e)
+      }
+      facts.downloadStatusTitle = dlTab.title
+      dlServer.close()
+      this.closeTab(dlTab.id)
+      this.switchTab(tab.id)
+
+      // ---- Wikipedia hover: does the SITE show its own preview card with no
+      // context menu involved? (Source of the 'panel behind menu' report.) ----
+      this.openTab('https://en.wikipedia.org/wiki/Web_browser')
+      const wikiTab = this.activeTab()!
+      const wEnd = Date.now() + 20000
+      while (!/Web browser/.test(wikiTab.title) && Date.now() < wEnd) await wait(300)
+      const wikiWc = this.tabs.webContentsFor(wikiTab.id)!
+      const linkPos: string = await wikiWc.executeJavaScript(`(() => {
+        const a = document.querySelector('#mw-content-text .mw-parser-output p a')
+        if (!a) return 'NO-LINK'
+        const r = a.getBoundingClientRect()
+        return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2)
+      })()`)
+      if (linkPos !== 'NO-LINK') {
+        const [lx, ly] = (linkPos as string).split(',').map(Number)
+        wikiWc.sendInputEvent({ type: 'mouseMove', x: lx, y: ly })
+        let preview = ''
+        const hEnd = Date.now() + 6000
+        while (!preview && Date.now() < hEnd) {
+          await wait(300)
+          preview = await wikiWc.executeJavaScript(`(() => {
+            const p = document.querySelector('.mwe-popups')
+            if (!p || !p.textContent || !p.textContent.trim()) return ''
+            const cs = getComputedStyle(p)
+            return cs.display + '/' + cs.visibility + '/' + p.className
+          })()`)
+        }
+        facts.wikipediaHoverPreview = preview || 'NOT SHOWN'
+        if (preview) await capture('hover-1-wikipedia-preview')
+      } else {
+        facts.wikipediaHoverPreview = 'NO LINK FOUND'
+      }
+
       writeFileSync(`${dir}/overlay-verify.json`, JSON.stringify(facts, null, 2))
       console.log('[openarc] overlay-verify done', JSON.stringify(facts))
       app.exit(0)
