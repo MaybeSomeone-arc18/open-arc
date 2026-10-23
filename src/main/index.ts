@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session, clipboard } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard } from 'electron'
 import { readerToggle } from './reader'
 import { buildPageContextMenu } from './contextmenu'
 import { join } from 'node:path'
@@ -200,7 +200,36 @@ class OpenArcApp {
     this.win.webContents.on('render-process-gone', (_e, details) => {
       if (!isCrashReason(details.reason) || this.win.isDestroyed()) return
       console.log(`[openarc] shell renderer gone: ${details.reason}`)
-      if (shellGate.shouldAutoRecover('shell')) this.win.webContents.reload()
+      if (shellGate.shouldAutoRecover('shell')) {
+        this.win.webContents.reload()
+        return
+      }
+      // Second crash inside the gate window: no more auto-reload. Ask the user.
+      // Saved state is flushed first (the 300ms debounce could otherwise drop
+      // the latest change); in-flight page state is not durable and is lost.
+      if (this.crashDialogOpen) return
+      this.crashDialogOpen = true
+      try { this.store.flush(this.state) } catch { /* best effort */ }
+      void dialog
+        .showMessageBox(this.win, {
+          type: 'error',
+          message: 'Open Arc\u2019s window crashed twice in a row.',
+          detail: 'Your spaces and tabs were saved. Reload to try again, or quit and reopen Open Arc.',
+          buttons: ['Reload', 'Quit'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true
+        })
+        .then((r) => {
+          this.crashDialogOpen = false
+          if (r.response === 0 && !this.win.isDestroyed()) {
+            shellGate.forget('shell')
+            this.win.webContents.reload()
+          } else {
+            app.quit()
+          }
+        })
+        .catch(() => { this.crashDialogOpen = false })
     })
     this.win.webContents.on('did-finish-load', () => {
       console.log('[openarc] renderer finished load')
@@ -507,6 +536,7 @@ class OpenArcApp {
    * No effect in normal use.
    */
   private shellCrashRan = false
+  private crashDialogOpen = false
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
     if (!dir) return
@@ -550,9 +580,22 @@ class OpenArcApp {
       let after = -2
       try { after = await probeState() } catch { /* reported below */ }
       check('shell crash: renderer responds and state is intact after reload', after === spacesBefore && this.state.spaces.length === spacesBefore, `spaces ${spacesBefore}->${after}`)
+      // Second crash inside the gate: the real native dialog must appear. An
+      // external driver (scripts/shell-crash.mjs) answers it; Reload -> the
+      // shell loads again and responds, Quit -> the process exits.
       this.win.webContents.forcefullyCrashRenderer()
-      await wait(4000)
-      check('shell crash: immediate repeat crash is NOT auto-reloaded (no loop)', loads === 1 && this.win.webContents.isCrashed(), `loads=${loads} crashed=${this.win.webContents.isCrashed()}`)
+      await wait(1500)
+      check('shell crash: repeat crash is NOT silently auto-reloaded (loads still 1 while dialog is open)', loads === 1, `loads=${loads}`)
+      writeFileSync(`${dir}/report-shellcrash-progress.json`, JSON.stringify({ phase: 'dialog-open', checks }))
+      if (process.env.OPEN_ARC_SHELLCRASH_EXPECT === 'quit') {
+        await wait(20000) // the driver answers Quit; the app exits before this returns
+        check('shell crash: Quit was not chosen (timeout)', false)
+      } else {
+        const back = await pollUntil(() => loads >= 2 && !this.win.webContents.isCrashed(), 25000)
+        let n = -2
+        try { n = await probeState() } catch { /* reported below */ }
+        check('shell crash: after dialog Reload the shell loads and responds with state intact', back && n === spacesBefore, `loads=${loads} spaces=${n}`)
+      }
       writeFileSync(`${dir}/report-shellcrash.json`, JSON.stringify({ phase: 'shellcrash', checks }, null, 2))
       app.exit(checks.every((c) => c.pass) ? 0 : 1)
       return
