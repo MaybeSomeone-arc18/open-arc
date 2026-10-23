@@ -198,6 +198,7 @@ if (freshRetireCode === 0) {
   freshMarkerfailCode = await launch('freshmarkerfail', { OPEN_ARC_USER_DATA: prof, OPEN_ARC_FAULT_INJECT: 'retire' })
   if (freshMarkerfailCode === 0) {
     writeFileSync(join(sdir, 'state.json'), mkValid('Diverged Work')) // later normal saves diverge
+    rmSync(join(sdir, 'state.json.recovery-log'), { recursive: true, force: true }) // fault cleared for the next boot
     freshReofferCode = await launch('freshreoffer', { OPEN_ARC_USER_DATA: prof })
   }
   rmSync(prof, { recursive: true, force: true })
