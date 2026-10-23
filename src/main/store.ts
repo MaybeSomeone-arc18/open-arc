@@ -177,14 +177,16 @@ export class StateStore {
       let bytes: Buffer
       try { bytes = readFileSync(path) } catch { continue }
       const hash = sha256(bytes)
-      let marker = markers.get(name)
+      const marker = markers.get(name)
       if (!marker && stateBytes && bytes.equals(stateBytes)) {
-        try {
-          this.appendMarker({ name, sha256: hash, decision: 'accepted' })
-          marker = { name, sha256: hash, decision: 'accepted' }
-        } catch { /* retry next boot */ }
+        // Recognized as already-committed: record the bookkeeping WITHOUT
+        // renaming the file (discovery stays non-destructive); the marker
+        // alone suppresses re-offers, even after state.json diverges.
+        try { this.appendMarker({ name, sha256: hash, decision: 'accepted' }) } catch { /* retry next boot */ }
+        continue
       }
       if (!marker || marker.sha256 !== hash) continue
+      // A recorded user decision whose retirement was interrupted: retry it.
       try { renameSync(path, this.uniquePath(`${path}.${marker.decision}-${stamp()}`)) } catch { /* retry next boot */ }
     }
   }
@@ -282,7 +284,10 @@ export class StateStore {
         const b = readFileSync(backup)
         if (a.length !== b.length || !a.equals(b)) throw new Error('backup verification failed')
       }
-      const tmp = this.uniquePath(`${statePath}.tmp-${stamp()}`)
+      // No uniquePath here: a stale tmp from a crashed recovery is our own
+      // staging file and may be overwritten; a DIRECTORY at this exact path
+      // is the test-injected staging-write failure (EISDIR).
+      const tmp = `${statePath}.tmp-${stamp()}`
       writeFileSync(tmp, cand.bytes)
       const fd = openSync(tmp, 'r')
       try { fsyncSync(fd) } finally { closeSync(fd) }

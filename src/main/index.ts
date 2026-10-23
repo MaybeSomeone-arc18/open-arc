@@ -898,6 +898,120 @@ class OpenArcApp {
       return
     }
 
+    if (process.env.OPEN_ARC_PHASE?.startsWith('fresh') || process.env.OPEN_ARC_PHASE === 'renamefail') {
+      // .fresh restart-recovery phases: the runner planted each profile
+      // BEFORE launch. Choices are driven through applyRecoveryChoice - the
+      // exact path the dialog's buttons use.
+      await wait(1200)
+      const stateDir = join(app.getPath('userData'), 'open-arc')
+      const { readdirSync: rdSync2, readFileSync: rfSync2, rmSync: rmSync2 } = await import('node:fs')
+      const files = (): string[] => { try { return rdSync2(stateDir).sort() } catch { return [] as string[] } }
+      const read = (f: string): string | null => { try { return rfSync2(join(stateDir, f), 'utf8') } catch { return null } }
+      const phase = process.env.OPEN_ARC_PHASE
+      const F1 = 'state.json.fresh-2026-10-23T05-50-00-000Z'
+      const F2 = 'state.json.fresh-2026-10-23T05-52-00-000Z'
+      const F3 = 'state.json.fresh-2026-10-23T05-55-00-000Z'
+
+      if (phase === 'freshaccept') {
+        const offer = this.store.getRecoveryOffer()
+        check('freshaccept: newest valid candidate offered', offer?.candidateName === F3, JSON.stringify(offer))
+        check('freshaccept: valid current state not treated as stale', offer?.currentValid === true)
+        check('freshaccept: other candidates listed, none hidden', (offer?.otherNames ?? []).includes(F1) && (offer?.malformedNames ?? []).includes(F2), JSON.stringify(offer))
+        const dialogUp = await pollUntil(async () => { try { return await this.win.webContents.executeJavaScript("!!document.querySelector('.recovery-dialog')") } catch { return false } }, 6000)
+        check('freshaccept: recovery choice dialog visible', dialogUp)
+        if (dialogUp) {
+          try {
+            const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 840 } })
+            if (srcs.length && !srcs[0].thumbnail.isEmpty()) writeFileSync(`${dir}/recovery-dialog.png`, srcs[0].thumbnail.toPNG())
+          } catch { /* capture best-effort */ }
+        }
+        const origBytes = read('state.json')
+        const candBytes = read(F3)
+        this.createSpace('Pending Mutation')
+        await wait(800)
+        check('freshaccept: saves held while choice pending', read('state.json') === origBytes, 'state.json changed before decision')
+        const res = this.applyRecoveryChoice(true)
+        check('freshaccept: accept succeeds', res.ok, res.error ?? res.warning ?? '')
+        check('freshaccept: committed bytes exactly match candidate', read('state.json') === candBytes)
+        const backups = files().filter((f) => f.startsWith('state.json.corrupt-'))
+        check('freshaccept: verified byte backup of the original preserved', backups.length === 1 && read(backups[0]) === origBytes, files().join(','))
+        check('freshaccept: accepted candidate retired', !files().includes(F3) && files().some((f) => f.startsWith(F3 + '.accepted-')), files().join(','))
+        check('freshaccept: other candidates untouched', read(F1) !== null && read(F2) === '{"spaces": broken', files().join(','))
+        check('freshaccept: recovered state applied live', this.state.spaces.some((sp) => sp.name === 'Fresh Recovered Space') && !this.state.spaces.some((sp) => sp.name === 'Pending Mutation'), this.state.spaces.map((sp) => sp.name).join(','))
+        await wait(800)
+        check('freshaccept: saves resume after commit', (read('state.json') ?? '').includes('Fresh Recovered Space') && this.store.lastSaveError === null, `lastSaveError=${this.store.lastSaveError}`)
+        const logText = read('state.json.recovery-log') ?? ''
+        check('freshaccept: accepted decision recorded with content hash', logText.includes('"decision":"accepted"') && logText.includes(F3), logText || '(empty)')
+      } else if (phase === 'freshreject') {
+        const offer = this.store.getRecoveryOffer()
+        check('freshreject: candidate offered beside unreadable original', offer?.candidateName === F3 && offer.currentValid === false, JSON.stringify(offer))
+        const origBytes = read('state.json')
+        this.createSpace('Pending Mutation Reject')
+        await wait(800)
+        check('freshreject: saves held while choice pending', read('state.json') === origBytes)
+        const res = this.applyRecoveryChoice(false)
+        check('freshreject: decline succeeds', res.ok, res.error ?? '')
+        check('freshreject: declined candidate retired, bytes kept', !files().includes(F3) && files().some((f) => f.startsWith(F3 + '.declined-')), files().join(','))
+        const backups = files().filter((f) => f.startsWith('state.json.corrupt-'))
+        check('freshreject: unreadable original quarantined only after the decision', backups.length === 1 && read(backups[0]) === origBytes, files().join(','))
+        await wait(800)
+        const after = read('state.json') ?? ''
+        check('freshreject: defaults persist after decision, recovered work not loaded', after.includes('Pending Mutation Reject') && !after.includes('Fresh Reject Space'), after.slice(0, 100))
+      } else if (phase === 'freshmalformed') {
+        check('freshmalformed: no offer without a valid candidate', this.store.getRecoveryOffer() === null)
+        const notice = this.store.getMalformedNotice()
+        check('freshmalformed: malformed candidate surfaced', notice?.names.includes(F3) === true, JSON.stringify(notice))
+        const dialogUp = await pollUntil(async () => { try { return await this.win.webContents.executeJavaScript("!!document.querySelector('.recovery-dialog')") } catch { return false } }, 6000)
+        check('freshmalformed: notice dialog visible', dialogUp)
+        const origBytes = read('state.json')
+        const candBytes = read(F3)
+        check('freshmalformed: accept impossible without valid candidate', this.store.acceptRecovery().ok === false)
+        check('freshmalformed: both files byte-intact', read('state.json') === origBytes && read(F3) === candBytes)
+        this.createSpace('Malformed Probe')
+        await wait(800)
+        check('freshmalformed: normal saves still work (nothing pending)', (read('state.json') ?? '').includes('Malformed Probe'))
+        const dismiss = this.store.dismissMalformed(false)
+        check('freshmalformed: dont-ask retires byte-preservingly', dismiss.ok && files().some((f) => f.startsWith(F3 + '.declined-')), files().join(','))
+      } else if (phase === 'freshwritefail') {
+        const offer = this.store.getRecoveryOffer()
+        check('freshwritefail: candidate offered', offer?.candidateName === F3, JSON.stringify(offer))
+        const origBytes = read('state.json')
+        const candBytes = read(F3)
+        const fail = this.store.acceptRecovery()
+        check('freshwritefail: staging failure after verified backup reported, not committed', fail.ok === false && (fail.error ?? '').includes('unchanged'), fail.error ?? 'no error')
+        check('freshwritefail: original untouched at its path', read('state.json') === origBytes)
+        check('freshwritefail: candidate untouched', read(F3) === candBytes)
+        const backups = files().filter((f) => f.startsWith('state.json.corrupt-'))
+        check('freshwritefail: verified backup retained', backups.length === 1 && read(backups[0]) === origBytes, files().join(','))
+        check('freshwritefail: offer still pending after failure', this.store.getRecoveryOffer() !== null)
+        rmSync2(join(stateDir, 'state.json.tmp-2026-10-23T06-00-00-000Z'), { recursive: true })
+        const ok2 = this.applyRecoveryChoice(true)
+        check('freshwritefail: same accept succeeds once the fault clears', ok2.ok, ok2.error ?? '')
+        check('freshwritefail: committed bytes exactly match candidate', read('state.json') === candBytes)
+        const backups2 = files().filter((f) => f.startsWith('state.json.corrupt-'))
+        check('freshwritefail: second backup collision-safe, first not clobbered', backups2.length === 2 && backups2.every((b) => read(b) === origBytes), backups2.join(','))
+      } else if (phase === 'freshinterrupted') {
+        const offer = this.store.getRecoveryOffer()
+        check('freshinterrupted: committed leftover not re-offered; different candidate offered', offer?.candidateName === F1, JSON.stringify(offer))
+        check('freshinterrupted: leftover stays in place, not auto-renamed', files().includes(F3), files().join(','))
+        const logText = read('state.json.recovery-log') ?? ''
+        check('freshinterrupted: leftover recognized as committed in the log', logText.includes(F3) && logText.includes('"accepted"'), logText || '(empty)')
+        const res = this.applyRecoveryChoice(true)
+        check('freshinterrupted: accepting the different candidate commits', res.ok && (read('state.json') ?? '').includes('Other Space'), res.error ?? '')
+      } else if (phase === 'renamefail') {
+        check('renamefail: quarantine rename failed in a WRITABLE dir (injected)', this.store.quarantinedTo === null)
+        check('renamefail: no recovery offer without candidates', this.store.getRecoveryOffer() === null)
+        const origBytes = read('state.json')
+        check('renamefail: unreadable original byte-intact', origBytes === 'rename fail garbage')
+        this.createSpace('Renamefail Probe')
+        const landed = await pollUntil(() => (read('state.json.fresh-2026-10-23T06-00-00-000Z') ?? '').includes('Renamefail Probe'), 5000)
+        check('renamefail: save redirected to .fresh, original never replaced', landed && read('state.json') === origBytes, files().join(','))
+      }
+      writeFileSync(`${dir}/report-${phase}.json`, JSON.stringify({ phase, checks }, null, 2))
+      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      return
+    }
+
     await wait(3500)
     await shot('1-shell')
 

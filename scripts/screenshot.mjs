@@ -18,7 +18,7 @@
  * access (the suite loads example.com, example.org and wikipedia.org for real).
  */
 import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -117,10 +117,62 @@ try {
   preserveDetail = q.length + ' quarantine file(s), bytes ' + (preserved ? 'match' : 'MISMATCH')
 } catch (e) { preserveDetail = String(e) }
 console.log((preserved ? 'PASS' : 'FAIL') + '  recovery: quarantined original bytes preserved  (' + preserveDetail + ')')
+// .fresh restart-recovery phases: each boots a purpose-planted profile
+// through the real app. FIXED_NOW is TEST-ONLY fault injection that makes
+// timestamped names deterministic (EISDIR via pre-created directories).
+const FIXED_NOW = '2026-10-23T06:00:00.000Z'
+const FIXED_STAMP = '2026-10-23T06-00-00-000Z'
+const F1 = 'state.json.fresh-2026-10-23T05-50-00-000Z'
+const F2 = 'state.json.fresh-2026-10-23T05-52-00-000Z'
+const F3 = 'state.json.fresh-2026-10-23T05-55-00-000Z'
+const mkValid = (name) => JSON.stringify({
+  spaces: [{ id: 's1', name, color: '#aabbcc', icon: 'F', pinned: [], today: [], archived: [], activeTabId: null, splitTabId: null }],
+  activeSpaceId: 's1', sidebarVisible: true, archiveAfterMs: 86400000, recentlyClosed: [], windowBounds: null, history: []
+}, null, 2)
+async function launchFresh(phase, plant, extraEnv, gate) {
+  if (gate !== 0) return 1
+  const prof = mkdtempSync(join(tmpdir(), 'open-arc-fresh-'))
+  const sdir = join(prof, 'open-arc')
+  mkdirSync(sdir, { recursive: true })
+  plant(sdir)
+  const code = await launch(phase, { OPEN_ARC_USER_DATA: prof, ...extraEnv })
+  rmSync(prof, { recursive: true, force: true })
+  return code
+}
+const freshAcceptCode = await launchFresh('freshaccept', (d) => {
+  writeFileSync(join(d, 'state.json'), mkValid('Original Current Space'))
+  writeFileSync(join(d, F1), mkValid('Older Valid Space'))
+  writeFileSync(join(d, F2), '{"spaces": broken')
+  writeFileSync(join(d, F3), mkValid('Fresh Recovered Space'))
+}, {}, quaranCode)
+const freshRejectCode = await launchFresh('freshreject', (d) => {
+  writeFileSync(join(d, 'state.json'), 'not json garbage{{{')
+  writeFileSync(join(d, F3), mkValid('Fresh Reject Space'))
+}, {}, freshAcceptCode)
+const freshMalformedCode = await launchFresh('freshmalformed', (d) => {
+  writeFileSync(join(d, 'state.json'), mkValid('Original Current Space'))
+  writeFileSync(join(d, F3), 'not valid json at all')
+}, {}, freshRejectCode)
+const freshWritefailCode = await launchFresh('freshwritefail', (d) => {
+  writeFileSync(join(d, 'state.json'), 'write fail garbage')
+  writeFileSync(join(d, F3), mkValid('Fresh Writefail Space'))
+  mkdirSync(join(d, `state.json.tmp-${FIXED_STAMP}`)) // DIRECTORY: staging write fails EISDIR
+}, { OPEN_ARC_FIXED_NOW: FIXED_NOW }, freshMalformedCode)
+const freshInterruptedCode = await launchFresh('freshinterrupted', (d) => {
+  const x = mkValid('Interrupted Space')
+  writeFileSync(join(d, 'state.json'), x)
+  writeFileSync(join(d, F3), x)
+  writeFileSync(join(d, F1), mkValid('Other Space'))
+}, {}, freshWritefailCode)
+const renamefailCode = await launchFresh('renamefail', (d) => {
+  writeFileSync(join(d, 'state.json'), 'rename fail garbage')
+  mkdirSync(join(d, `state.json.corrupt-${FIXED_STAMP}`)) // DIRECTORY: quarantine rename fails EISDIR in a WRITABLE dir
+}, { OPEN_ARC_FIXED_NOW: FIXED_NOW }, freshInterruptedCode)
+
 rmSync(profile, { recursive: true, force: true })
 
-let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || !preserved
-for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json']) {
+let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || freshAcceptCode !== 0 || freshRejectCode !== 0 || freshMalformedCode !== 0 || freshWritefailCode !== 0 || freshInterruptedCode !== 0 || renamefailCode !== 0 || !preserved
+for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json', 'report-freshaccept.json', 'report-freshreject.json', 'report-freshmalformed.json', 'report-freshwritefail.json', 'report-freshinterrupted.json', 'report-renamefail.json']) {
   const r = report(file)
   if (!r) { console.error(`[smoke] missing ${file}`); failed = true; continue }
   for (const c of r.checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)
