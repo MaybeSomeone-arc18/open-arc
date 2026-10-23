@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar'
 import { CommandBar } from './components/CommandBar'
 import { FindBar } from './components/FindBar'
 import { ShortcutsOverlay } from './components/ShortcutsOverlay'
+import { SplitDivider } from './components/SplitDivider'
 
 export function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null)
@@ -183,6 +184,9 @@ export function App(): JSX.Element {
   return (
     <div className="app" style={{ ['--space-color' as string]: space.color }}>
       {state.sidebarVisible && <Sidebar state={state} space={space} loadingTabs={loadingTabs} onOpenCommandBar={() => setCommandBarOpen(true)} />}
+      {space.splitTabId !== null && (
+        <SplitDivider sidebarVisible={state.sidebarVisible} ratio={space.splitRatio ?? 0.5} />
+      )}
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
       {findBarOpen && <FindBar onClose={() => { setFindBarOpen(false); window.openArc.focusPage() }} />}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => { setShortcutsOpen(false); window.openArc.focusPage() }} />}

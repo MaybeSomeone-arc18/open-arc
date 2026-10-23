@@ -58,6 +58,60 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
         />
       </div>
 
+      {state.favorites && state.favorites.length > 0 && (
+        <div className="favorites-container">
+          <div className="favorites-grid">
+            {state.favorites.map((fav) => {
+              const isActive = fav.id === space.activeTabId || fav.id === space.splitTabId
+              const isFocused = space.splitTabId
+                ? (space.focusedTabId ? fav.id === space.focusedTabId : fav.id === space.activeTabId)
+                : fav.id === space.activeTabId
+              return (
+                <div
+                  key={fav.id}
+                  className={`favorite-tile ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
+                  title={`${fav.title || fav.url}\n(Alt+click to split, right-click/action to unfavorite)`}
+                  onClick={(e) => {
+                    if (e.altKey) {
+                      e.preventDefault()
+                      window.openArc.splitTabWith(fav.id)
+                    } else {
+                      window.openArc.switchTab(fav.id)
+                    }
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      window.openArc.closeTab(fav.id)
+                    }
+                  }}
+                >
+                  {loadingTabs.has(fav.id) ? (
+                    <span className="favicon loading" title="Loading">⟳</span>
+                  ) : fav.favicon ? (
+                    <img className="favicon" src={fav.favicon} alt="" />
+                  ) : (
+                    <span className="favicon fallback">◦</span>
+                  )}
+                  <span className="favorite-title">{fav.title || fav.url}</span>
+                  <button
+                    className="favorite-remove"
+                    title="Unfavorite"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      window.openArc.toggleFavorite(fav.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="space-header" onDoubleClick={() => { setNameDraft(space.name); setRenaming(true) }}>
         {renaming ? (
           <input
@@ -94,9 +148,14 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
       <div className="tab-scroll">
         <div className="section-label">Pinned</div>
         {space.pinned.length === 0 && <div className="empty-hint">Pin tabs to keep them here</div>}
-        {space.pinned.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId} loading={loadingTabs.has(tab.id)} />
-        ))}
+        {space.pinned.map((tab) => {
+          const isSplitPartner = tab.id === space.splitTabId
+          const isActive = tab.id === space.activeTabId || isSplitPartner
+          const isFocused = space.splitTabId ? (space.focusedTabId ? tab.id === space.focusedTabId : tab.id === space.activeTabId) : tab.id === space.activeTabId
+          return (
+            <TabRow key={tab.id} tab={tab} active={isActive} focused={isFocused} loading={loadingTabs.has(tab.id)} />
+          )
+        })}
 
         <div className="section-label with-action">
           <span>Today</span>
@@ -106,9 +165,14 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
           </span>
         </div>
         {space.today.length === 0 && <div className="empty-hint">Open tabs appear here</div>}
-        {space.today.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId || tab.id === space.splitTabId} loading={loadingTabs.has(tab.id)} />
-        ))}
+        {space.today.map((tab) => {
+          const isSplitPartner = tab.id === space.splitTabId
+          const isActive = tab.id === space.activeTabId || isSplitPartner
+          const isFocused = space.splitTabId ? (space.focusedTabId ? tab.id === space.focusedTabId : tab.id === space.activeTabId) : tab.id === space.activeTabId
+          return (
+            <TabRow key={tab.id} tab={tab} active={isActive} focused={isFocused} loading={loadingTabs.has(tab.id)} />
+          )
+        })}
 
         {space.archived.length > 0 && (
           <>

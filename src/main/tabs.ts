@@ -2,6 +2,7 @@ import { BrowserWindow, Menu, WebContentsView, type Rectangle } from 'electron'
 import { buildPageContextMenu } from './contextmenu'
 import type { Space, TabItem } from '../shared/types'
 import { matchShortcut } from '../shared/shortcuts'
+import { computeSplitPaneBounds, DIVIDER_WIDTH, MIN_PANE_WIDTH, type SplitPaneBounds } from '../shared/splitGeometry'
 
 const SIDEBAR_WIDTH = 280
 
@@ -24,7 +25,8 @@ export class TabLayer {
     onLoading: (tabId: string, loading: boolean) => void = () => {},
     private onNavigate: (tab: TabItem) => void = () => {},
     private onOpenInNewTab: (url: string) => void = () => {},
-    private onShortcut: (action: string, arg?: string) => void = () => {}
+    private onShortcut: (action: string, arg?: string) => void = () => {},
+    private onTabFocused: (tabId: string) => void = () => {}
   ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
@@ -34,6 +36,7 @@ export class TabLayer {
     // they finish so tab panes track the final content size.
     win.on('enter-full-screen', () => this.layout())
     win.on('leave-full-screen', () => this.layout())
+    win.on('closed', () => this.stopSplitDrag())
   }
 
   setSidebarVisible(visible: boolean): void {
@@ -51,6 +54,105 @@ export class TabLayer {
   private hiddenIds = new Set<string>()
   private static FIND_BAR_INSET = 48
   private static TOAST_INSET = 64
+  static readonly DIVIDER_WIDTH = DIVIDER_WIDTH
+  static readonly MIN_PANE_WIDTH = MIN_PANE_WIDTH
+  private splitRatio = 0.5
+  private dragShieldView: WebContentsView | null = null
+
+  setSplitRatio(ratio: number): void {
+    if (!Number.isFinite(ratio)) ratio = 0.5
+    this.splitRatio = Math.max(0.1, Math.min(0.9, ratio))
+    this.layout()
+  }
+
+  getSplitRatio(): number {
+    return this.splitRatio
+  }
+
+  /**
+   * Option B: Temporary native drag-shield WebContentsView attached over the
+   * content area during split resizing. Captures all OS-level pointer moves and
+   * the pointerup release cleanly without dropping tracking over child views.
+   */
+  startSplitDrag(
+    onMove: (clientX: number) => void,
+    onEnd: () => void,
+    onCancel: () => void
+  ): void {
+    this.stopSplitDrag()
+    if (this.attachedIds.length < 2) return
+
+    const shield = new WebContentsView({
+      webPreferences: { sandbox: true }
+    })
+    shield.setBackgroundColor('#00000000') // 100% transparent
+    this.win.contentView.addChildView(shield)
+    this.dragShieldView = shield
+
+    const [w, h] = this.win.getContentSize()
+    const x = this.sidebarVisible ? SIDEBAR_WIDTH : 0
+    const width = Math.max(0, w - x)
+    const top = this.findBarOpen && !this.modalOpen ? TabLayer.FIND_BAR_INSET : 0
+    const bottom = this.toastOpen && !this.modalOpen ? TabLayer.TOAST_INSET : 0
+    shield.setBounds({ x, y: top, width, height: Math.max(0, h - top - bottom) })
+
+    // Minimal transparent page with pointer listeners that communicate via console.log
+    const html = `<!DOCTYPE html><html><head><style>
+      html, body { margin:0; padding:0; width:100%; height:100%; background:transparent; overflow:hidden; cursor:col-resize; user-select:none; }
+    </style></head><body><script>
+      window.addEventListener('pointermove', (e) => {
+        console.log('OA_SHIELD_MOVE:' + Math.round(e.clientX));
+      });
+      window.addEventListener('pointerup', () => {
+        console.log('OA_SHIELD_UP');
+      });
+      window.addEventListener('pointercancel', () => {
+        console.log('OA_SHIELD_CANCEL');
+      });
+      window.addEventListener('blur', () => {
+        console.log('OA_SHIELD_CANCEL');
+      });
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') console.log('OA_SHIELD_CANCEL');
+      });
+    </script></body></html>`
+
+    shield.webContents.loadURL('data:text/html,' + encodeURIComponent(html)).catch(() => {})
+
+    // Intercept console messages from shield
+    shield.webContents.on('console-message', (_event, _level, message) => {
+      if (message.startsWith('OA_SHIELD_MOVE:')) {
+        const cx = parseInt(message.slice('OA_SHIELD_MOVE:'.length), 10)
+        if (Number.isFinite(cx)) onMove(x + cx)
+      } else if (message === 'OA_SHIELD_UP') {
+        this.stopSplitDrag()
+        onEnd()
+      } else if (message === 'OA_SHIELD_CANCEL') {
+        this.stopSplitDrag()
+        onCancel()
+      }
+    })
+
+    // Prevent any unwanted navigation away from data URL
+    shield.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    shield.webContents.on('will-navigate', (e) => e.preventDefault())
+  }
+
+  isDraggingSplit(): boolean {
+    return this.dragShieldView !== null
+  }
+
+  stopSplitDrag(): void {
+    if (this.dragShieldView) {
+      if (this.win.contentView.children.includes(this.dragShieldView)) {
+        this.win.contentView.removeChildView(this.dragShieldView)
+      }
+      try {
+        this.dragShieldView.webContents.close()
+      } catch {}
+      this.dragShieldView = null
+    }
+  }
 
   setOverlayState(modal: boolean, findBar: boolean, toast: boolean): void {
     this.modalOpen = modal
@@ -70,21 +172,44 @@ export class TabLayer {
     }
   }
 
-  private layout(): void {
+  layout(): void {
     const [w, h] = this.win.getContentSize()
     const x = this.sidebarVisible ? SIDEBAR_WIDTH : 0
-    const width = Math.max(0, w - x)
+    const availWidth = Math.max(0, w - x)
     const top = this.findBarOpen && !this.modalOpen ? TabLayer.FIND_BAR_INSET : 0
-    // Toasts render in the shell DOM at bottom-right; reserve a bottom strip
-    // so feedback is never hidden behind page content.
     const bottom = this.toastOpen && !this.modalOpen ? TabLayer.TOAST_INSET : 0
-    const n = this.attachedIds.length || 1
-    this.attachedIds.forEach((id, i) => {
-      const view = this.views.get(id)
-      if (!view) return
-      const paneWidth = Math.floor(width / n)
-      view.setBounds({ x: x + i * paneWidth, y: top, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: Math.max(0, h - top - bottom) })
-    })
+    const height = Math.max(0, h - top - bottom)
+    const n = this.attachedIds.length
+
+    if (n === 0) return
+
+    if (n === 1) {
+      const view = this.views.get(this.attachedIds[0])
+      if (view) view.setBounds({ x, y: top, width: availWidth, height })
+      return
+    }
+
+    // Two-pane horizontal split geometry
+    const viewLeft = this.views.get(this.attachedIds[0])
+    const viewRight = this.views.get(this.attachedIds[1])
+    if (!viewLeft || !viewRight) return
+
+    const bounds = TabLayer.computePaneBounds(availWidth, this.splitRatio)
+    viewLeft.setBounds({ x, y: top, width: bounds.leftWidth, height })
+    viewRight.setBounds({ x: x + bounds.leftWidth + bounds.dividerWidth, y: top, width: bounds.rightWidth, height })
+
+    if (this.dragShieldView && this.win.contentView.children.includes(this.dragShieldView)) {
+      this.dragShieldView.setBounds({ x, y: top, width: availWidth, height })
+    }
+  }
+
+  /**
+   * Pure mathematical calculation of split pane bounds given available width and ratio.
+   * Enforces 6px divider, 260px min pane width when space permits, and deterministic
+   * equal-split fallback when usable width < 520px.
+   */
+  static computePaneBounds(availWidth: number, ratio: number): SplitPaneBounds {
+    return computeSplitPaneBounds(availWidth, ratio)
   }
 
   private ensureView(tab: TabItem): WebContentsView {
@@ -95,6 +220,9 @@ export class TabLayer {
     this.views.set(tab.id, view)
     // Attach listeners BEFORE loadURL: with in-process rendering the
     // load events can dispatch synchronously and would be missed.
+    view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
+    view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
+    view.webContents.on('focus', () => this.onTabFocused(tab.id))
     const push = (): void => {
       tab.title = view.webContents.getTitle() || tab.url
       this.onTabUpdated({ ...tab, title: tab.title })
@@ -161,8 +289,6 @@ export class TabLayer {
       event.preventDefault()
       this.onShortcut(m.id, m.arg)
     })
-    view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
-    view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
@@ -190,8 +316,9 @@ export class TabLayer {
   }
 
   /** Attach views for the active tab (and split partner), detach everything else. */
-  show(space: Space): void {
-    const all = [...space.pinned, ...space.today]
+  show(space: Space, extraTabs: TabItem[] = []): void {
+    this.stopSplitDrag()
+    const all = [...space.pinned, ...space.today, ...extraTabs]
     const active = all.find((t) => t.id === space.activeTabId)
     const split = space.splitTabId ? all.find((t) => t.id === space.splitTabId) : undefined
     const wanted = [active, split].filter((t): t is TabItem => !!t && t.id !== undefined)
@@ -209,6 +336,11 @@ export class TabLayer {
       }
       if (this.modalOpen) { view.setVisible(false); this.hiddenIds.add(tab.id) }
       if (!this.attachedIds.includes(tab.id)) this.attachedIds.push(tab.id)
+    }
+    if (space.splitRatio !== undefined) {
+      this.splitRatio = Math.max(0.1, Math.min(0.9, space.splitRatio))
+    } else {
+      this.splitRatio = 0.5
     }
     this.layout()
   }
@@ -337,9 +469,13 @@ export class TabLayer {
   async capture(tabId: string): Promise<Buffer | null> {
     const view = this.views.get(tabId)
     if (!view) return null
-    const img = await view.webContents.capturePage()
-    if (img.isEmpty()) return null
-    return img.toPNG()
+    try {
+      const img = await view.webContents.capturePage()
+      if (img.isEmpty()) return null
+      return img.toPNG()
+    } catch {
+      return null
+    }
   }
 }
 

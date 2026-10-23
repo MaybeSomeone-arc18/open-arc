@@ -52,6 +52,14 @@ function validateStateShape(p: unknown): AppState {
     }
     if (space.activeTabId !== null && typeof space.activeTabId !== 'string') throw new Error('space activeTabId must be a string or null')
     if (space.splitTabId !== null && typeof space.splitTabId !== 'string') throw new Error('space splitTabId must be a string or null')
+    if (space.focusedTabId !== undefined && space.focusedTabId !== null && typeof space.focusedTabId !== 'string') throw new Error('space focusedTabId must be a string or null')
+    if (space.splitRatio !== undefined) {
+      if (typeof space.splitRatio !== 'number' || !Number.isFinite(space.splitRatio)) {
+        space.splitRatio = 0.5
+      } else {
+        space.splitRatio = Math.max(0.1, Math.min(0.9, Math.round(space.splitRatio * 1000) / 1000))
+      }
+    }
   }
   if (typeof s.activeSpaceId !== 'string') throw new Error('activeSpaceId must be a string')
   if (s.sidebarVisible !== undefined && typeof s.sidebarVisible !== 'boolean') throw new Error('sidebarVisible must be a boolean')
@@ -61,6 +69,10 @@ function validateStateShape(p: unknown): AppState {
   if (s.windowBounds !== undefined && s.windowBounds !== null) {
     const b = s.windowBounds as Record<string, unknown>
     for (const k of ['x', 'y', 'width', 'height']) if (typeof b[k] !== 'number') throw new Error(`windowBounds ${k} must be a number`)
+  }
+  if (s.favorites !== undefined) {
+    if (!Array.isArray(s.favorites)) throw new Error('favorites must be an array')
+    for (const t of s.favorites as unknown[]) checkTab(t)
   }
   return p as AppState
 }

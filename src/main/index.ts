@@ -62,6 +62,7 @@ function defaultState(): AppState {
   return {
     spaces: [space],
     activeSpaceId: space.id,
+    favorites: [],
     sidebarVisible: true,
     archiveAfterMs: Number(process.env.OPEN_ARC_ARCHIVE_MS) || 12 * 60 * 60 * 1000,
     recentlyClosed: [],
@@ -76,6 +77,10 @@ function migrate(state: AppState): AppState {
   state.recentlyClosed = state.recentlyClosed ?? []
   state.windowBounds = state.windowBounds ?? null
   state.history = state.history ?? []
+  state.favorites = state.favorites ?? []
+  for (const f of state.favorites) {
+    f.lastActiveAt = f.lastActiveAt ?? Date.now()
+  }
   for (const s of state.spaces) {
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
@@ -105,7 +110,16 @@ class OpenArcApp {
 
   private activeTab(): TabItem | null {
     const space = this.activeSpace()
-    return [...space.pinned, ...space.today].find((t) => t.id === space.activeTabId) ?? null
+    const all = [...(this.state.favorites ?? []), ...space.pinned, ...space.today]
+    return all.find((t) => t.id === space.activeTabId) ?? null
+  }
+
+  /** The tab currently owning keyboard/command focus: either activeTab or splitTab. */
+  private focusedTab(): TabItem | null {
+    const space = this.activeSpace()
+    const targetId = (space.splitTabId && space.focusedTabId) ? space.focusedTabId : space.activeTabId
+    const all = [...(this.state.favorites ?? []), ...space.pinned, ...space.today]
+    return all.find((t) => t.id === targetId) ?? this.activeTab()
   }
 
   /** Most-recent-first history; consecutive same-URL entries merge (title refresh). */
@@ -126,7 +140,7 @@ class OpenArcApp {
   private commit(): void {
     this.store.save(this.state)
     this.win.webContents.send('state:changed', this.state)
-    this.tabs.show(this.activeSpace())
+    this.tabs.show(this.activeSpace(), this.state.favorites ?? [])
   }
 
   start(): void {
@@ -258,6 +272,15 @@ class OpenArcApp {
       // shell renderer, which owns the command bar / find bar / overlays.
       (action, arg) => {
         if (!this.win.isDestroyed()) this.win.webContents.send('app:shortcut', action, arg)
+      },
+      (tabId) => {
+        const space = this.activeSpace()
+        if (space.splitTabId && (space.activeTabId === tabId || space.splitTabId === tabId)) {
+          if (space.focusedTabId !== tabId) {
+            space.focusedTabId = tabId
+            this.commit()
+          }
+        }
       }
     )
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
@@ -322,6 +345,33 @@ class OpenArcApp {
   }
 
   private closeTab(tabId: string): void {
+    // Check if it's a global favorite
+    this.state.favorites = this.state.favorites ?? []
+    const favIdx = this.state.favorites.findIndex((t) => t.id === tabId)
+    if (favIdx !== -1) {
+      const favTab = this.state.favorites[favIdx]
+      this.state.favorites.splice(favIdx, 1)
+      this.state.recentlyClosed.unshift({ url: favTab.url, title: favTab.title, spaceId: this.state.activeSpaceId, pinned: true, closedAt: Date.now() })
+      this.state.recentlyClosed = this.state.recentlyClosed.slice(0, 20)
+      for (const space of this.state.spaces) {
+        if (space.splitTabId === tabId) {
+          space.splitTabId = null
+        } else if (space.activeTabId === tabId && space.splitTabId) {
+          space.activeTabId = space.splitTabId
+          space.splitTabId = null
+        } else if (space.activeTabId === tabId) {
+          const rest = [...(this.state.favorites ?? []), ...space.pinned, ...space.today]
+          space.activeTabId = rest[rest.length - 1]?.id ?? null
+        }
+        if (space.focusedTabId === tabId || !space.splitTabId) {
+          space.focusedTabId = space.activeTabId
+        }
+      }
+      this.tabs.close(tabId)
+      this.commit()
+      return
+    }
+
     for (const space of this.state.spaces) {
       const inPinned = space.pinned.findIndex((t) => t.id === tabId)
       const inToday = space.today.findIndex((t) => t.id === tabId)
@@ -335,10 +385,18 @@ class OpenArcApp {
       if (inPinned !== -1) space.pinned.splice(inPinned, 1)
       if (inToday !== -1) space.today.splice(inToday, 1)
       if (inArchived !== -1) space.archived.splice(inArchived, 1)
-      if (space.splitTabId === tabId) space.splitTabId = null
-      if (space.activeTabId === tabId) {
-        const rest = [...space.pinned, ...space.today]
+      if (space.splitTabId === tabId) {
+        space.splitTabId = null
+      } else if (space.activeTabId === tabId && space.splitTabId) {
+        // Closing active tab while split is active: promote splitTab to active tab
+        space.activeTabId = space.splitTabId
+        space.splitTabId = null
+      } else if (space.activeTabId === tabId) {
+        const rest = [...(this.state.favorites ?? []), ...space.pinned, ...space.today]
         space.activeTabId = rest[rest.length - 1]?.id ?? null
+      }
+      if (space.focusedTabId === tabId || !space.splitTabId) {
+        space.focusedTabId = space.activeTabId
       }
       this.tabs.close(tabId)
       break
@@ -368,7 +426,46 @@ class OpenArcApp {
     this.commit()
   }
 
+  private toggleFavorite(tabId: string): void {
+    this.state.favorites = this.state.favorites ?? []
+    const favIdx = this.state.favorites.findIndex((t) => t.id === tabId)
+    if (favIdx !== -1) {
+      // Unfavorite: move tab to current active space's pinned list
+      const [tab] = this.state.favorites.splice(favIdx, 1)
+      tab.pinned = true
+      this.activeSpace().pinned.push(tab)
+      this.commit()
+      return
+    }
+
+    // Favorite: find tab across spaces (in pinned or today)
+    for (const space of this.state.spaces) {
+      const inPinned = space.pinned.findIndex((t) => t.id === tabId)
+      const inToday = space.today.findIndex((t) => t.id === tabId)
+      if (inPinned !== -1 || inToday !== -1) {
+        const fromList = inPinned !== -1 ? space.pinned : space.today
+        const [tab] = fromList.splice(inPinned !== -1 ? inPinned : inToday, 1)
+        tab.pinned = true
+        this.state.favorites.push(tab)
+        // If it was the space's active tab, keep it active as a favorite
+        this.commit()
+        return
+      }
+    }
+  }
+
   private switchTab(tabId: string): void {
+    // Check if it's a favorite tab (active in current space)
+    const fav = (this.state.favorites ?? []).find((t) => t.id === tabId)
+    if (fav) {
+      const space = this.activeSpace()
+      space.activeTabId = fav.id
+      space.focusedTabId = fav.id
+      fav.lastActiveAt = Date.now()
+      this.commit()
+      return
+    }
+
     // Tabs are addressable across spaces (command bar lists all of them):
     // switching to a tab in another space follows it there.
     for (const space of this.state.spaces) {
@@ -376,6 +473,7 @@ class OpenArcApp {
       if (tab) {
         this.state.activeSpaceId = space.id
         space.activeTabId = tab.id
+        space.focusedTabId = tab.id
         tab.lastActiveAt = Date.now()
         this.commit()
         return
@@ -384,15 +482,39 @@ class OpenArcApp {
   }
 
   // ---- Split view ----
-  private addSplit(): void {
+  private splitTabWith(targetTabId: string): void {
+    const space = this.activeSpace()
+    const active = this.activeTab()
+    if (!active || !targetTabId || targetTabId === active.id) return
+
+    // Find target tab in current space (pinned or today)
+    const targetTab = [...space.pinned, ...space.today].find((t) => t.id === targetTabId)
+    if (!targetTab) return
+
+    space.splitTabId = targetTab.id
+    space.focusedTabId = targetTab.id
+    this.commit()
+  }
+
+  private addSplit(preferredPartnerId?: string): void {
     const space = this.activeSpace()
     const active = this.activeTab()
     if (!active) return
-    if (space.splitTabId) {
+    if (space.splitTabId && !preferredPartnerId) {
       space.splitTabId = null // toggle off
+      space.focusedTabId = space.activeTabId
     } else {
-      const partner = space.today.find((t) => t.id !== active.id) ?? space.pinned.find((t) => t.id !== active.id)
-      if (partner) space.splitTabId = partner.id
+      let partner: TabItem | undefined
+      if (preferredPartnerId && preferredPartnerId !== active.id) {
+        partner = [...space.pinned, ...space.today].find((t) => t.id === preferredPartnerId)
+      }
+      if (!partner) {
+        partner = space.today.find((t) => t.id !== active.id) ?? space.pinned.find((t) => t.id !== active.id)
+      }
+      if (partner) {
+        space.splitTabId = partner.id
+        space.focusedTabId = partner.id // partner becomes the newly opened pane with focus
+      }
     }
     this.commit()
   }
@@ -442,7 +564,8 @@ class OpenArcApp {
       case 'go-back':
       case 'go-forward': {
         const dir = id === 'go-back' ? 'back' : id === 'go-forward' ? 'forward' : id === 'hard-reload' ? 'hard-reload' : 'reload'
-        if (active) this.tabs.navigate(active.id, dir)
+        const target = this.focusedTab()
+        if (target) this.tabs.navigate(target.id, dir)
         break
       }
       case 'new-space':
@@ -838,6 +961,9 @@ class OpenArcApp {
         this.state.windowBounds?.width === 1000 && this.state.windowBounds?.height === 700 && b.width === 1000 && b.height === 700,
         `saved=${JSON.stringify(this.state.windowBounds)} live=${b.width}x${b.height}`
       )
+      check('persist: splitRatio survives restart', personal?.splitRatio === 0.65, `splitRatio=${personal?.splitRatio}`)
+      const favPersisted = (this.state.favorites ?? []).some((t) => t.url.includes('fav=1'))
+      check('persist: favorites survive restart', favPersisted, `count=${this.state.favorites?.length}`)
       await shot('6-relaunch-restored')
       writeFileSync(`${dir}/report-verify.json`, JSON.stringify({ phase: 'verify', checks }, null, 2))
       this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
@@ -1132,6 +1258,10 @@ class OpenArcApp {
     check('shortcut map: Cmd+W closes tab', sm('w', { meta: true })?.id === 'close-tab')
     check('shortcut map: Cmd+L focuses command entry', sm('l', { meta: true })?.id === 'open-command-bar')
     check('shortcut map: Cmd+R reloads tab', sm('r', { meta: true })?.id === 'reload')
+    check('shortcut map: Ctrl+Cmd+Option+= adds split view', sm('=', { ctrl: true, meta: true, alt: true })?.id === 'split-view')
+    check('shortcut map: Ctrl+Cmd+Option+- closes split view', sm('-', { ctrl: true, meta: true, alt: true })?.id === 'close-split')
+    check('shortcut map: Ctrl+Shift+= adds split view (legacy)', sm('=', { ctrl: true, shift: true })?.id === 'split-view')
+    check('shortcut map: Ctrl+Shift+- closes split view (legacy)', sm('-', { ctrl: true, shift: true })?.id === 'close-split')
     check(
       'shortcut map: ordinary typing matches nothing',
       sm('t') === null && sm('1') === null && sm('x', { shift: true }) === null
@@ -1155,9 +1285,14 @@ class OpenArcApp {
     const exampleTab = this.activeTab()!
     const loaded = await pollUntil(() => exampleTab.title === 'Example Domain', 15000)
     check('navigation: example.com loads (live title)', loaded, `title="${exampleTab.title}"`)
+    const loadEventsFired = await pollUntil(
+      () => this.loadingEvents.includes(`${exampleTab.id}:start`) && this.loadingEvents.includes(`${exampleTab.id}:stop`),
+      5000
+    )
     check(
       'loading indicator events fire (start + stop)',
-      this.loadingEvents.includes(`${exampleTab.id}:start`) && this.loadingEvents.includes(`${exampleTab.id}:stop`)
+      loadEventsFired,
+      `events=[${this.loadingEvents.join(', ')}] target=${exampleTab.id}`
     )
 
     // Zoom: Ctrl+= zooms the active tab in through the real keyboard path,
@@ -1319,8 +1454,10 @@ class OpenArcApp {
     }
     check('error page: failed load shows friendly message', errorShown)
     if (errorShown && failWc && !failWc.isDestroyed()) {
-      const errImg = await failWc.capturePage()
-      writeFileSync(`${dir}/8-error-page.png`, errImg.toPNG())
+      try {
+        const errImg = await failWc.capturePage()
+        if (!errImg.isEmpty()) writeFileSync(`${dir}/8-error-page.png`, errImg.toPNG())
+      } catch { /* capture unavailable in restricted compositor */ }
     }
     this.closeTab(failTab.id)
 
@@ -1689,7 +1826,7 @@ class OpenArcApp {
     )
     await wait(300)
 
-    // Split view on/off
+    // Split view on/off and Patch 2 ratio management
     this.runCommand('split-view')
     const splitOn = this.activeSpace().splitTabId !== null
     await wait(1500)
@@ -1697,8 +1834,109 @@ class OpenArcApp {
     const capB = this.activeSpace().splitTabId ? await this.tabs.capture(this.activeSpace().splitTabId!) : null
     if (capA) writeFileSync(`${dir}/4-split-primary.png`, capA)
     if (capB) writeFileSync(`${dir}/4-split-partner.png`, capB)
+
+    // Test Patch 2: Geometry bounds with default ratio (0.5)
+    const primaryId = this.activeSpace().activeTabId!
+    const partnerId = this.activeSpace().splitTabId!
+    const boundsLeftInit = this.tabs.getTabBounds(primaryId)
+    const boundsRightInit = this.tabs.getTabBounds(partnerId)
+    const [winW, winH] = this.win.getContentSize()
+    const sidebarW = this.state.sidebarVisible ? 280 : 0
+    const availW = winW - sidebarW
+    const usableW = availW - TabLayer.DIVIDER_WIDTH // e.g. 1000 - 280 - 6 = 714
+    check(
+      'split: initial geometry bounds at 0.5 ratio',
+      !!boundsLeftInit && !!boundsRightInit &&
+      boundsLeftInit.width + TabLayer.DIVIDER_WIDTH + boundsRightInit.width === availW &&
+      boundsRightInit.x === boundsLeftInit.x + boundsLeftInit.width + TabLayer.DIVIDER_WIDTH,
+      `left=${boundsLeftInit?.width} right=${boundsRightInit?.width} avail=${availW}`
+    )
+
+    // Test Patch 2: Preview ratio (in-memory only, no disk save)
+    this.tabs.setSplitRatio(0.7)
+    const boundsLeftPreview = this.tabs.getTabBounds(primaryId)
+    const boundsRightPreview = this.tabs.getTabBounds(partnerId)
+    check(
+      'split: preview ratio updates layout in-memory',
+      !!boundsLeftPreview && !!boundsRightPreview &&
+      boundsLeftPreview.width === Math.round(usableW * 0.7) &&
+      this.activeSpace().splitRatio === undefined,
+      `preview left=${boundsLeftPreview?.width} space.splitRatio=${this.activeSpace().splitRatio}`
+    )
+
+    // Test Patch 2: Commit ratio (commits to state and persists)
+    this.activeSpace().splitRatio = 0.65
+    this.tabs.setSplitRatio(0.65)
+    this.commit()
+    check(
+      'split: commit ratio updates space state',
+      this.activeSpace().splitRatio === 0.65,
+      `splitRatio=${this.activeSpace().splitRatio}`
+    )
+
+    // Test Patch 2: Reset ratio to 0.5
+    this.tabs.setSplitRatio(0.5)
+    check(
+      'split: reset restores equal split',
+      this.tabs.getSplitRatio() === 0.5,
+      `ratio=${this.tabs.getSplitRatio()}`
+    )
+    // Test Patch 2: Regression test verifying renderer DOM divider position matches main-process pane bounds
+    // Case 1: Clamped ratio (e.g. 0.95 clamped to 0.9 / 260px min right pane)
+    this.activeSpace().splitRatio = 0.9
+    this.commit()
+    await wait(200)
+    const domDividerLeft = await this.win.webContents.executeJavaScript(
+      "(() => { const el = document.querySelector('.split-divider'); return el ? parseInt(el.style.left, 10) : null })()"
+    )
+    const mainPaneBounds = this.tabs.getTabBounds(primaryId)
+    check(
+      'split: renderer divider position matches main pane boundary on clamped ratio',
+      domDividerLeft !== null && mainPaneBounds !== null && domDividerLeft === sidebarW + mainPaneBounds.width,
+      `domLeft=${domDividerLeft} expected=${mainPaneBounds ? sidebarW + mainPaneBounds.width : 'null'}`
+    )
+
+    // Restore committed 0.65 for verify phase persistence test
+    this.activeSpace().splitRatio = 0.65
+    this.tabs.setSplitRatio(0.65)
+    this.commit()
+
+    // Test Patch 2: Narrow window deterministic fallback
+    // Pure geometry verification: 600px window with 280px sidebar => availW=320, usableW=314 => 157px each
+    const calc320 = TabLayer.computePaneBounds(320, 0.65)
+    check(
+      'split: narrow window equal-split fallback (157px each)',
+      calc320.leftWidth === 157 && calc320.rightWidth === 157 &&
+      calc320.leftWidth + calc320.dividerWidth + calc320.rightWidth === 320,
+      `left=${calc320.leftWidth} right=${calc320.rightWidth}`
+    )
+    // Zero/divider-only edge case verification
+    const calcZero = TabLayer.computePaneBounds(TabLayer.DIVIDER_WIDTH, 0.5)
+    check(
+      'split: zero usable width edge case yields zero-width bounds',
+      calcZero.leftWidth === 0 && calcZero.rightWidth === 0,
+      `left=${calcZero.leftWidth} right=${calcZero.rightWidth}`
+    )
+
     this.runCommand('split-view')
     check('split view on/off', splitOn && this.activeSpace().splitTabId === null)
+
+    // Test Patch 3: Option-click tab opens split alongside active tab
+    const otherTab = this.activeSpace().today.find((t) => t.id !== exampleTab.id) ?? this.activeSpace().pinned.find((t) => t.id !== exampleTab.id)
+    if (otherTab) {
+      this.splitTabWith(otherTab.id)
+      check(
+        'split: splitTabWith opens targeted tab as split partner',
+        this.activeSpace().activeTabId === exampleTab.id && this.activeSpace().splitTabId === otherTab.id && this.activeSpace().focusedTabId === otherTab.id,
+        `active=${this.activeSpace().activeTabId} split=${this.activeSpace().splitTabId} focused=${this.activeSpace().focusedTabId}`
+      )
+      // Test Patch 3: Close split pane restores single-pane view and clears splitTabId
+      this.runCommand('close-split')
+      check(
+        'split: close-split removes split and retains surviving tab',
+        this.activeSpace().splitTabId === null && this.activeSpace().activeTabId !== null
+      )
+    }
 
     // Spaces: create + activate, then cross-space tab follow
     const before = this.state.spaces.length
@@ -1792,6 +2030,38 @@ class OpenArcApp {
     const unpinned = !this.activeSpace().pinned.some((t) => t.id === exampleTab.id) && this.activeSpace().today.some((t) => t.id === exampleTab.id)
     this.setPinned(exampleTab.id, true)
     check('unpin then re-pin round trip', unpinned && this.activeSpace().pinned.some((t) => t.id === exampleTab.id))
+
+    // Milestone 2: Global Favorites Grid
+    this.openTab('https://example.com/?fav=1')
+    const favTab = this.activeTab()!
+    await pollUntil(() => (this.tabs.currentUrl(favTab.id) ?? '').includes('fav=1'), 5000)
+    this.toggleFavorite(favTab.id)
+    check(
+      'favorites: toggleFavorite moves tab into global favorites array',
+      (this.state.favorites ?? []).some((t) => t.id === favTab.id) &&
+        !this.activeSpace().today.some((t) => t.id === favTab.id),
+      `favoritesCount=${this.state.favorites?.length}`
+    )
+    // Switch to another space, assert favorite is still addressable & activates in that space
+    this.switchTab(exampleTab.id)
+    const smokeSp = this.state.spaces.find((sp) => sp.name === 'Smoke')!
+    this.state.activeSpaceId = smokeSp.id
+    this.commit()
+    this.switchTab(favTab.id)
+    check(
+      'favorites: switching to favorite activates it in current space',
+      this.activeSpace().id === smokeSp.id && this.activeSpace().activeTabId === favTab.id,
+      `activeSpace=${this.activeSpace().name} activeTab=${this.activeSpace().activeTabId}`
+    )
+    // Switch back to Personal space and verify favorite tile DOM in renderer
+    this.state.activeSpaceId = this.state.spaces.find((sp) => sp.name === 'Personal')!.id
+    this.commit()
+    await wait(300)
+    const favDomExists = await this.win.webContents.executeJavaScript(
+      "!!document.querySelector('.favorites-grid .favorite-tile')"
+    )
+    check('favorites: renderer displays favorite tile in grid', favDomExists)
+    // Keep this favorite pinned into favorites for the verify phase restart test
 
     // Reopen closed tab (Ctrl+Shift+T path): close the wiki tab, reopen by URL
     const wikiUrl = wikiTab.url
@@ -1993,32 +2263,34 @@ class OpenArcApp {
     ipcMain.on('tab:open', (_e, url: string) => this.openTab(url))
     ipcMain.on('tab:close', (_e, tabId: string) => this.closeTab(tabId))
     ipcMain.on('tab:switch', (_e, tabId: string) => this.switchTab(tabId))
+    ipcMain.on('tab:split-with', (_e, tabId: string) => this.splitTabWith(tabId))
     ipcMain.on('tab:pin', (_e, tabId: string) => this.setPinned(tabId, true))
     ipcMain.on('tab:unpin', (_e, tabId: string) => this.setPinned(tabId, false))
+    ipcMain.on('tab:favorite', (_e, tabId: string) => this.toggleFavorite(tabId))
     ipcMain.on('tab:restore', (_e, tabId: string) => this.restoreTab(tabId))
     ipcMain.handle('find:in-page', (_e, text: string, findNext: boolean) => {
-      const active = this.activeTab()
-      return active ? this.tabs.findIn(active.id, text, !!findNext) : null
+      const target = this.focusedTab()
+      return target ? this.tabs.findIn(target.id, text, !!findNext) : null
     })
     ipcMain.on('find:stop', () => {
-      const active = this.activeTab()
-      if (active) this.tabs.stopFind(active.id)
+      const target = this.focusedTab()
+      if (target) this.tabs.stopFind(target.id)
     })
     ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
-      const active = this.activeTab()
-      if (!active) return 1
-      const factor = this.tabs.adjustZoom(active.id, action)
-      active.zoom = factor // persisted; restored when the view is (re)created
+      const target = this.focusedTab()
+      if (!target) return 1
+      const factor = this.tabs.adjustZoom(target.id, action)
+      target.zoom = factor // persisted; restored when the view is (re)created
       this.store.save(this.state)
       return factor
     })
     ipcMain.handle('tab:mute-toggle', () => {
-      const active = this.activeTab()
-      return active ? this.tabs.toggleMute(active.id) : false
+      const target = this.focusedTab()
+      return target ? this.tabs.toggleMute(target.id) : false
     })
     ipcMain.handle('tab:print-pdf', async () => {
-      const active = this.activeTab()
-      const wc = active ? this.tabs.webContentsFor(active.id) : null
+      const target = this.focusedTab()
+      const wc = target ? this.tabs.webContentsFor(target.id) : null
       if (!wc) return null
       try {
         const data = await wc.printToPDF({ printBackground: true })
@@ -2034,8 +2306,8 @@ class OpenArcApp {
       }
     })
     ipcMain.handle('tab:reader', async () => {
-      const active = this.activeTab()
-      const wc = active ? this.tabs.webContentsFor(active.id) : null
+      const target = this.focusedTab()
+      const wc = target ? this.tabs.webContentsFor(target.id) : null
       if (!wc) return 'no-content'
       try {
         return (await wc.executeJavaScript(`(${readerToggle.toString()})()`)) as string
@@ -2044,19 +2316,19 @@ class OpenArcApp {
       }
     })
     ipcMain.handle('tab:devtools', () => {
-      const active = this.activeTab()
-      return active ? this.tabs.toggleDevTools(active.id) : false
+      const target = this.focusedTab()
+      return target ? this.tabs.toggleDevTools(target.id) : false
     })
     ipcMain.handle('tab:copy-url', () => {
-      const active = this.activeTab()
-      if (!active) return null
-      const url = this.tabs.currentUrl(active.id)
+      const target = this.focusedTab()
+      if (!target) return null
+      const url = this.tabs.currentUrl(target.id)
       if (url) clipboard.writeText(url)
       return url
     })
     ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
-      const active = this.activeTab()
-      if (active) this.tabs.navigate(active.id, cmd)
+      const target = this.focusedTab()
+      if (target) this.tabs.navigate(target.id, cmd)
     })
     ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
     ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => this.windowControl(action))
@@ -2067,11 +2339,76 @@ class OpenArcApp {
       if (this.win.isDestroyed()) return
       if (which === 'shell') this.win.webContents.focus()
       else {
-        const t = this.activeTab()
+        const t = this.focusedTab()
         if (t) this.tabs.focusTab(t.id)
       }
     })
     ipcMain.on('command:run', (_e, id: string, arg?: string) => this.runCommand(id, arg))
+
+    // Split view drag and ratio management
+    ipcMain.on('split:drag-start', () => {
+      const space = this.activeSpace()
+      const initialRatio = space.splitRatio ?? 0.5
+      const [w] = this.win.getContentSize()
+      const sidebarOffset = this.state.sidebarVisible ? 280 : 0
+      const usable = Math.max(0, w - sidebarOffset - TabLayer.DIVIDER_WIDTH)
+
+      this.tabs.startSplitDrag(
+        (clientX) => {
+          if (usable <= 0) return
+          const raw = (clientX - sidebarOffset - TabLayer.DIVIDER_WIDTH / 2) / usable
+          const minRatio = TabLayer.MIN_PANE_WIDTH / usable
+          const clamped = Math.max(minRatio, Math.min(1 - minRatio, raw))
+          this.tabs.setSplitRatio(clamped)
+        },
+        () => {
+          const finalRatio = this.tabs.getSplitRatio()
+          space.splitRatio = finalRatio
+          this.commit()
+          const focused = this.focusedTab()
+          if (focused) this.tabs.focusTab(focused.id)
+        },
+        () => {
+          this.tabs.setSplitRatio(initialRatio)
+          const focused = this.focusedTab()
+          if (focused) this.tabs.focusTab(focused.id)
+        }
+      )
+    })
+
+    ipcMain.on('split:preview-ratio', (_e, ratio: number) => {
+      this.tabs.setSplitRatio(ratio)
+    })
+
+    ipcMain.on('split:commit-ratio', (_e, ratio: number) => {
+      this.tabs.stopSplitDrag()
+      const space = this.activeSpace()
+      const sanitized = Number.isFinite(ratio) ? Math.max(0.1, Math.min(0.9, Math.round(ratio * 1000) / 1000)) : 0.5
+      space.splitRatio = sanitized
+      this.tabs.setSplitRatio(sanitized)
+      this.commit()
+      const focused = this.focusedTab()
+      if (focused) this.tabs.focusTab(focused.id)
+    })
+
+    ipcMain.on('split:cancel-ratio', () => {
+      this.tabs.stopSplitDrag()
+      const space = this.activeSpace()
+      const ratio = space.splitRatio ?? 0.5
+      this.tabs.setSplitRatio(ratio)
+      const focused = this.focusedTab()
+      if (focused) this.tabs.focusTab(focused.id)
+    })
+
+    ipcMain.on('split:reset-ratio', () => {
+      this.tabs.stopSplitDrag()
+      const space = this.activeSpace()
+      space.splitRatio = 0.5
+      this.tabs.setSplitRatio(0.5)
+      this.commit()
+      const focused = this.focusedTab()
+      if (focused) this.tabs.focusTab(focused.id)
+    })
   }
 }
 

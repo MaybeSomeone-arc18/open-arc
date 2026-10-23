@@ -29,6 +29,10 @@ export interface Space {
   activeTabId: string | null
   /** When set, this tab renders beside the active tab (2-pane split). */
   splitTabId: string | null
+  /** ID of the tab that currently has active keyboard/navigation focus (activeTabId or splitTabId). */
+  focusedTabId?: string | null
+  /** Width fraction of the left (active) pane when splitTabId is set. In [0.1, 0.9], defaults to 0.5. */
+  splitRatio?: number
 }
 
 export interface ClosedTab {
@@ -57,6 +61,8 @@ export interface AppState {
   windowBounds: { x: number; y: number; width: number; height: number } | null
   /** Navigation history, most recent first, capped at 500. */
   history: HistoryEntry[]
+  /** Global favorite tabs (pinned permanently across all Spaces). */
+  favorites?: TabItem[]
 }
 
 export interface CommandDef {
@@ -116,9 +122,11 @@ export interface OpenArcApi {
   openTab(url: string): void
   closeTab(tabId: string): void
   switchTab(tabId: string): void
+  splitTabWith(tabId: string): void
   pinTab(tabId: string): void
   unpinTab(tabId: string): void
   restoreTab(tabId: string): void
+  toggleFavorite(tabId: string): void
 
   navigate(command: 'back' | 'forward' | 'reload'): void
   findInPage(text: string, findNext?: boolean): Promise<{ matches: number; activeMatchOrdinal: number } | null>
@@ -141,4 +149,11 @@ export interface OpenArcApi {
 
   runCommand(commandId: string, arg?: string): void
   listCommands(): Promise<CommandDef[]>
+
+  /** Split divider drag controls. */
+  startSplitDrag(): void
+  previewSplitRatio(ratio: number): void
+  commitSplitRatio(ratio: number): void
+  cancelSplitRatio(): void
+  resetSplitRatio(): void
 }

@@ -53,8 +53,10 @@ const api: OpenArcApi = {
   openTab: (url) => ipcRenderer.send('tab:open', url),
   closeTab: (id) => ipcRenderer.send('tab:close', id),
   switchTab: (id) => ipcRenderer.send('tab:switch', id),
+  splitTabWith: (id) => ipcRenderer.send('tab:split-with', id),
   pinTab: (id) => ipcRenderer.send('tab:pin', id),
   unpinTab: (id) => ipcRenderer.send('tab:unpin', id),
+  toggleFavorite: (id) => ipcRenderer.send('tab:favorite', id),
   restoreTab: (id) => ipcRenderer.send('tab:restore', id),
 
   navigate: (cmd) => ipcRenderer.send('nav', cmd),
@@ -78,7 +80,13 @@ const api: OpenArcApi = {
   },
 
   runCommand: (id, arg) => ipcRenderer.send('command:run', id, arg),
-  listCommands: () => ipcRenderer.invoke('commands:list') as Promise<CommandDef[]>
+  listCommands: () => ipcRenderer.invoke('commands:list') as Promise<CommandDef[]>,
+
+  startSplitDrag: () => ipcRenderer.send('split:drag-start'),
+  previewSplitRatio: (ratio) => ipcRenderer.send('split:preview-ratio', ratio),
+  commitSplitRatio: (ratio) => ipcRenderer.send('split:commit-ratio', ratio),
+  cancelSplitRatio: () => ipcRenderer.send('split:cancel-ratio'),
+  resetSplitRatio: () => ipcRenderer.send('split:reset-ratio')
 }
 
 contextBridge.exposeInMainWorld('openArc', api)

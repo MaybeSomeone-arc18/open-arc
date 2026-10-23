@@ -69,9 +69,17 @@ export function matchShortcut(d: ShortcutDescriptor): ShortcutMatch | null {
   if (mod && !d.shift && !d.alt && key === 'r') return { id: 'reload' }
   if (mod && key === 'l') return { id: 'open-command-bar' }
   if (mod && key === 'f') return { id: 'open-find-bar' }
-  if (mod && !d.shift && (key === '=' || key === '+')) return { id: 'zoom-in' }
-  if (mod && !d.shift && key === '-') return { id: 'zoom-out' }
-  if (mod && !d.shift && key === '0') return { id: 'zoom-reset' }
+  // Split view: Arc native Ctrl+Cmd+Option+= / Ctrl+Option+= or legacy Ctrl+Shift+=
+  if ((d.ctrl && d.alt && (key === '+' || key === '=')) || (mod && d.shift && (key === '+' || key === '='))) {
+    return { id: 'split-view' }
+  }
+  // Close split: Arc native Ctrl+Cmd+Option+- / Ctrl+Option+- or legacy Ctrl+Shift+-
+  if ((d.ctrl && d.alt && (key === '_' || key === '-')) || (mod && d.shift && (key === '_' || key === '-'))) {
+    return { id: 'close-split' }
+  }
+  if (mod && !d.shift && !d.alt && (key === '=' || key === '+')) return { id: 'zoom-in' }
+  if (mod && !d.shift && !d.alt && key === '-') return { id: 'zoom-out' }
+  if (mod && !d.shift && !d.alt && key === '0') return { id: 'zoom-reset' }
   if (mod && !d.shift && key === 'm') return { id: 'toggle-mute' }
   if (mod && !d.shift && key === 'u') return { id: 'view-source' }
   if (mod && !d.shift && !d.alt && key === 'p') return { id: 'print-pdf' }
@@ -84,8 +92,6 @@ export function matchShortcut(d: ShortcutDescriptor): ShortcutMatch | null {
   if (d.alt && key === 'ArrowLeft') return { id: 'go-back' }
   if (d.alt && key === 'ArrowRight') return { id: 'go-forward' }
   if (mod && key === 'd') return { id: 'pin-tab' }
-  if (mod && d.shift && (key === '+' || key === '=')) return { id: 'split-view' }
-  if (mod && d.shift && (key === '_' || key === '-')) return { id: 'close-split' }
   if (mod && key === '/') return { id: 'toggle-shortcuts' }
   return null
 }
