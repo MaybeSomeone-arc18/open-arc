@@ -10,6 +10,8 @@ import type { AppState } from '../shared/types'
 export class StateStore {
   private file: string
   private timer: NodeJS.Timeout | null = null
+  /** Set when load() found an unreadable state file and moved it aside. */
+  quarantinedTo: string | null = null
 
   constructor() {
     const dir = join(app.getPath('userData'), 'open-arc')
@@ -18,12 +20,23 @@ export class StateStore {
   }
 
   load(): AppState | null {
+    if (!existsSync(this.file)) return null
     try {
-      if (!existsSync(this.file)) return null
       const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as AppState
-      if (!Array.isArray(parsed.spaces) || parsed.spaces.length === 0) return null
+      if (!Array.isArray(parsed.spaces) || parsed.spaces.length === 0) throw new Error('state has no spaces')
       return parsed
-    } catch {
+    } catch (err) {
+      // Never silently overwrite a state file we cannot read: move it aside
+      // so the original bytes survive for inspection or manual recovery,
+      // then boot with defaults. A missing file (first run) is NOT this path.
+      const backup = `${this.file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      try {
+        renameSync(this.file, backup)
+        this.quarantinedTo = backup
+        console.warn(`[openarc] saved state unreadable (${String(err)}); original moved to ${backup}; starting fresh`)
+      } catch (moveErr) {
+        console.warn(`[openarc] saved state unreadable (${String(err)}); could not move it aside (${String(moveErr)}); starting fresh without touching it`)
+      }
       return null
     }
   }

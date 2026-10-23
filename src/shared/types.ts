@@ -73,6 +73,7 @@ export interface OpenArcApi {
   onTabLoading(cb: (tabId: string, loading: boolean) => void): () => void
   /** Transient: a download finished (state: completed | cancelled | interrupted). */
   onDownloadDone(cb: (info: { filename: string; path: string; state: string; size?: number }) => void): () => void
+  onStateRecovered(cb: (quarantinedPath: string) => void): () => void
 
   switchSpace(spaceId: string): void
   createSpace(name: string): void

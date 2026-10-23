@@ -37,6 +37,11 @@ export function App(): JSX.Element {
       if (toastTimer) clearTimeout(toastTimer)
       toastTimer = setTimeout(() => setDownloadToast(null), 6000)
     })
+    const offRecovered = window.openArc.onStateRecovered(() => {
+      setDownloadToast('Saved data was unreadable - the original was backed up and Open Arc started fresh')
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => setDownloadToast(null), 8000)
+    })
     const offLoading = window.openArc.onTabLoading((tabId, loading) => {
       setLoadingTabs((prev) => {
         const next = new Set(prev)
@@ -129,6 +134,7 @@ export function App(): JSX.Element {
       off()
       offLoading()
       offDownload()
+      offRecovered()
       offShortcut()
       if (toastTimer) clearTimeout(toastTimer)
       window.removeEventListener('keydown', onKey)

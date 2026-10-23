@@ -1,7 +1,7 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, clipboard } from 'electron'
 import { readerToggle } from './reader'
 import { buildPageContextMenu } from './contextmenu'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import * as fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { AppState, Space, TabItem } from '../shared/types'
@@ -134,34 +134,33 @@ class OpenArcApp {
     // accelerators (Ctrl+R = reload the SHELL, devtools, etc.) never fire.
     // All shortcuts live in the renderer and act on the active tab instead.
     Menu.setApplicationMenu(null)
-    const saved = this.state.windowBounds
-    this.win = new BrowserWindow({
-      width: saved?.width ?? 1280,
-      height: saved?.height ?? 840,
-      ...(saved ? { x: saved.x, y: saved.y } : {}),
-      minWidth: 720,
-      minHeight: 480,
-      frame: false,
-      backgroundColor: '#17161c',
-      webPreferences: {
-        preload: join(__dirname, '../preload/index.js'),
-        // The shell renderer only uses contextBridge + ipcRenderer from the
-        // preload, so the Chromium sandbox can stay on.
-        sandbox: true
-      }
-    })
+    this.createShellWindow()
     // Downloads: save into the system Downloads folder, toast on completion.
     this.downloadsDone = []
+    const inFlightDownloads = new Set<string>()
     session.defaultSession.on('will-download', (_e, item, wc) => {
-      const savePath = join(app.getPath('downloads'), item.getFilename())
+      // Never overwrite an existing (or in-flight) download with the same
+      // name: forcing a save path bypasses Chromium's own uniquification.
+      const dlDir = app.getPath('downloads')
+      const original = item.getFilename()
+      const dlExt = extname(original)
+      const dlBase = original.slice(0, original.length - dlExt.length)
+      let savePath = join(dlDir, original)
+      let collision = 1
+      while (fs.existsSync(savePath) || inFlightDownloads.has(savePath)) {
+        savePath = join(dlDir, `${dlBase} (${collision})${dlExt}`)
+        collision++
+      }
+      inFlightDownloads.add(savePath)
       item.setSavePath(savePath)
       item.once('done', (_ev, st) => {
+        inFlightDownloads.delete(savePath)
         // Verify the file really landed before telling the user it did.
         let size: number | undefined
         try {
           if (st === 'completed' && fs.existsSync(savePath)) size = fs.statSync(savePath).size
         } catch { size = undefined }
-        const info = { filename: item.getFilename(), path: savePath, state: st, size }
+        const info = { filename: basename(savePath), path: savePath, state: st, size }
         this.downloadsDone.push(info)
         if (!this.win.isDestroyed()) this.win.webContents.send('download:done', info)
         // A tab navigated directly at a binary is left blank once the
@@ -185,6 +184,49 @@ class OpenArcApp {
           wc.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(noteHtml)).catch(() => {})
         }
       })
+    })
+
+
+    // Default-deny every web permission request (camera, mic, notifications,
+    // geolocation, ...). Electron grants them unless a handler says no; a
+    // browser shell must decide deliberately. No prompts exist yet, so deny.
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+      callback(false)
+    })
+
+    this.registerIpc()
+    this.startArchiver()
+    setTimeout(() => this.archiveIdle(false), 5000)
+    app.on('before-quit', () => this.store.flush(this.state))
+  }
+
+
+  /**
+   * App-level wiring (IPC handlers, will-download, archiver, permission
+   * handler) runs exactly once in start(). macOS dock re-activation only
+   * recreates the shell window through here - re-running start() would throw
+   * on double ipcMain.handle registration and duplicate the listeners.
+   */
+  reopenWindow(): void {
+    this.createShellWindow()
+  }
+
+  private createShellWindow(): void {
+    const saved = this.state.windowBounds
+    this.win = new BrowserWindow({
+      width: saved?.width ?? 1280,
+      height: saved?.height ?? 840,
+      ...(saved ? { x: saved.x, y: saved.y } : {}),
+      minWidth: 720,
+      minHeight: 480,
+      frame: false,
+      backgroundColor: '#17161c',
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        // The shell renderer only uses contextBridge + ipcRenderer from the
+        // preload, so the Chromium sandbox can stay on.
+        sandbox: true
+      }
     })
 
     // Persist window bounds (normal state only) for next launch.
@@ -211,13 +253,6 @@ class OpenArcApp {
         if (!this.win.isDestroyed()) this.win.webContents.send('app:shortcut', action, arg)
       }
     )
-    // Default-deny every web permission request (camera, mic, notifications,
-    // geolocation, ...). Electron grants them unless a handler says no; a
-    // browser shell must decide deliberately. No prompts exist yet, so deny.
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false)
-    })
-
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
 
     if (isDev) {
@@ -228,13 +263,14 @@ class OpenArcApp {
     this.win.webContents.on('did-finish-load', () => {
       console.log('[openarc] renderer finished load')
       this.commit()
+      // State recovery notice: the store found an unreadable state file at
+      // boot, quarantined it and started fresh. Tell the user.
+      if (this.store.quarantinedTo && !this.win.isDestroyed()) {
+        this.win.webContents.send('state:recovered', this.store.quarantinedTo)
+      }
       void this.selfTest()
     })
 
-    this.registerIpc()
-    this.startArchiver()
-    setTimeout(() => this.archiveIdle(false), 5000)
-    app.on('before-quit', () => this.store.flush(this.state))
   }
 
   // ---- Auto-archive: idle unpinned tabs move to the space's archive ----
@@ -696,9 +732,13 @@ class OpenArcApp {
    * that a previous run's state survived the restart (persistence check).
    * No effect in normal use.
    */
+  private selfTestStarted = false
+
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
     if (!dir) return
+    if (this.selfTestStarted) return // did-finish-load also fires after a harness re-open
+    this.selfTestStarted = true
     if (process.env.OPEN_ARC_OVERLAY_VERIFY) return this.overlayVerify(dir)
     const { writeFileSync, mkdirSync } = await import('node:fs')
     mkdirSync(dir, { recursive: true })
@@ -752,6 +792,29 @@ class OpenArcApp {
       )
       await shot('6-relaunch-restored')
       writeFileSync(`${dir}/report-verify.json`, JSON.stringify({ phase: 'verify', checks }, null, 2))
+      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      return
+    }
+
+    if (process.env.OPEN_ARC_PHASE === 'corrupt' || process.env.OPEN_ARC_PHASE === 'partial') {
+      // State-recovery phases: the runner planted the state file BEFORE launch.
+      await wait(1500)
+      if (process.env.OPEN_ARC_PHASE === 'corrupt') {
+        check('recovery: unreadable state quarantined, not overwritten', this.store.quarantinedTo !== null, `quarantinedTo=${this.store.quarantinedTo}`)
+        check('recovery: app boots to a usable default state', this.state.spaces.length >= 1, `${this.state.spaces.length} spaces`)
+        const noticeShown = await pollUntil(async () => {
+          try { return await this.win.webContents.executeJavaScript("!!document.querySelector('.download-toast')") } catch { return false }
+        }, 6000)
+        check('recovery: user notified of the quarantine', noticeShown)
+      } else {
+        check('recovery: readable older state NOT quarantined', this.store.quarantinedTo === null, `quarantinedTo=${this.store.quarantinedTo}`)
+        check('recovery: recoverable spaces preserved', this.state.spaces.some((sp) => sp.name === 'Recovered Space'), `spaces=${this.state.spaces.map((sp) => sp.name).join(',')}`)
+      }
+      this.openTab('https://example.com/')
+      const rcTab = this.activeTab()!
+      const rcLoaded = await pollUntil(() => rcTab.title === 'Example Domain', 15000)
+      check('recovery: app functional after recovery', rcLoaded, `title="${rcTab.title}"`)
+      writeFileSync(`${dir}/report-${process.env.OPEN_ARC_PHASE}.json`, JSON.stringify({ phase: process.env.OPEN_ARC_PHASE, checks }, null, 2))
       app.exit(checks.every((c) => c.pass) ? 0 : 1)
       return
     }
@@ -1537,7 +1600,6 @@ class OpenArcApp {
       const { existsSync, readFileSync, unlinkSync } = await import('node:fs')
       const p = join(app.getPath('downloads'), 'open-arc-smoke.txt')
       dlOnDisk = existsSync(p) && readFileSync(p, 'utf8').includes('open-arc smoke download')
-      if (dlOnDisk) unlinkSync(p)
     } catch { /* reported by check below */ }
     check('downloads: file saves to Downloads folder', gotDl && dlOnDisk)
     // Direct navigation to a file leaves the tab blank once the navigation
@@ -1552,6 +1614,25 @@ class OpenArcApp {
       return !!b && b.height === dlContentH - 64
     }, 5000)
     check('toast: download feedback reserves a visible strip', toastInset, `bounds=${JSON.stringify(this.tabs.getTabBounds(dlTab.id))} contentH=${dlContentH}`)
+    // Reliability: a second download with the same filename must NOT
+    // overwrite the first (forced save paths bypass Chromium's uniquify).
+    this.openTab(`http://127.0.0.1:${dlPort}/file`)
+    const dlTab2 = this.activeTab()!
+    const gotDl2 = await pollUntil(() => this.downloadsDone.filter((d) => d.state === 'completed' && d.filename.includes('open-arc-smoke')).length >= 2, 10000)
+    let bothKept = false
+    let secondPath = ''
+    try {
+      const { existsSync: ex2, readFileSync: rf2, unlinkSync: ul2 } = await import('node:fs')
+      const dlDir2 = app.getPath('downloads')
+      const p1 = join(dlDir2, 'open-arc-smoke.txt')
+      const p2 = join(dlDir2, 'open-arc-smoke (1).txt')
+      secondPath = this.downloadsDone[this.downloadsDone.length - 1]?.path ?? ''
+      bothKept = ex2(p1) && ex2(p2) && rf2(p2, 'utf8').includes('open-arc smoke download')
+      if (ex2(p1)) ul2(p1)
+      if (ex2(p2)) ul2(p2)
+    } catch { /* reported by check below */ }
+    check('reliability: same-name download keeps both files', gotDl2 && bothKept, `second=${secondPath}`)
+    this.closeTab(dlTab2.id)
     this.closeTab(dlTab.id)
     dlServer.close()
 
@@ -1561,6 +1642,30 @@ class OpenArcApp {
     this.state.windowBounds = this.win.getBounds()
 
     this.store.flush(this.state)
+    // Reliability: the macOS dock re-activation path recreates the shell
+    // window on the RUNNING app. The old code constructed a second OpenArcApp
+    // whose start() re-registered ipcMain.handle channels - which throws.
+    // Exercised directly here (Linux): proves the re-open path no longer
+    // re-registers and stays functional. NOT a native Dock test.
+    const oldWin = this.win
+    let reopenErr = ''
+    try {
+      this.reopenWindow()
+    } catch (e) {
+      reopenErr = String(e)
+    }
+    check('reliability: window re-open runs without re-registering handlers', reopenErr === '', reopenErr || 'no throw')
+    if (reopenErr === '') {
+      const newWin = this.win
+      const ipcAlive = await pollUntil(async () => {
+        try {
+          return await newWin.webContents.executeJavaScript("window.openArc ? window.openArc.getState().then((s) => Array.isArray(s.spaces) && s.spaces.length >= 1) : false")
+        } catch { return false }
+      }, 15000)
+      check('reliability: re-opened window has working IPC and state', ipcAlive)
+      oldWin.destroy()
+    }
+
     writeFileSync(`${dir}/report-run.json`, JSON.stringify({ phase: 'run', checks }, null, 2))
     app.exit(checks.every((c) => c.pass) ? 0 : 1)
   }
@@ -1684,9 +1789,12 @@ class OpenArcApp {
 }
 
 app.whenReady().then(() => {
-  new OpenArcApp().start()
+  const openArc = new OpenArcApp()
+  openArc.start()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) new OpenArcApp().start()
+    // macOS: recreate ONLY the window on dock re-activation. The running
+    // instance keeps its IPC handlers, download listener and archiver.
+    if (BrowserWindow.getAllWindows().length === 0) openArc.reopenWindow()
   })
 })
 

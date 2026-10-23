@@ -18,6 +18,11 @@ const api: OpenArcApi = {
     ipcRenderer.on('download:done', listener)
     return () => ipcRenderer.removeListener('download:done', listener)
   },
+  onStateRecovered: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, quarantinedPath: string): void => cb(quarantinedPath)
+    ipcRenderer.on('state:recovered', listener)
+    return () => ipcRenderer.removeListener('state:recovered', listener)
+  },
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),

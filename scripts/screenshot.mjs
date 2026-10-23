@@ -18,7 +18,7 @@
  * access (the suite loads example.com, example.org and wikipedia.org for real).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -81,10 +81,33 @@ function report(file) {
 
 const runCode = await launch('run')
 const verifyCode = runCode === 0 ? await launch('verify') : 1
+
+// State-recovery phases: plant an unreadable, then an older-but-readable
+// state file and boot the real app over each.
+const stateDir = join(profile, 'open-arc')
+const stateFile = join(stateDir, 'state.json')
+const garbage = '{"spaces":[{"id":"broken","name":"Half","pinned":[],' // truncated JSON
+writeFileSync(stateFile, garbage)
+const corruptCode = verifyCode === 0 ? await launch('corrupt') : 1
+writeFileSync(stateFile, JSON.stringify({
+  spaces: [{ id: 's1', name: 'Recovered Space', color: '#8888ff', icon: 'R', pinned: [], today: [], archived: [], activeTabId: null }],
+  activeSpaceId: 's1',
+  sidebarVisible: true
+}))
+const partialCode = corruptCode === 0 ? await launch('partial') : 1
+// The unreadable original must survive as a quarantined copy, byte-for-byte.
+let preserved = false
+let preserveDetail = 'no quarantine file'
+try {
+  const q = readdirSync(stateDir).filter((f) => f.startsWith('state.json.corrupt-'))
+  preserved = q.length === 1 && readFileSync(join(stateDir, q[0]), 'utf8') === garbage
+  preserveDetail = q.length + ' quarantine file(s), bytes ' + (preserved ? 'match' : 'MISMATCH')
+} catch (e) { preserveDetail = String(e) }
+console.log((preserved ? 'PASS' : 'FAIL') + '  recovery: quarantined original bytes preserved  (' + preserveDetail + ')')
 rmSync(profile, { recursive: true, force: true })
 
-let failed = runCode !== 0 || verifyCode !== 0
-for (const file of ['report-run.json', 'report-verify.json']) {
+let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || !preserved
+for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json']) {
   const r = report(file)
   if (!r) { console.error(`[smoke] missing ${file}`); failed = true; continue }
   for (const c of r.checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)
