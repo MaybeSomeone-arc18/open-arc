@@ -297,6 +297,7 @@ export class StateStore {
       // Committed. Everything below is durability/bookkeeping.
       const warnings: string[] = []
       try {
+        if (process.env.OPEN_ARC_FAULT_INJECT === 'dirsync') throw new Error('injected dirsync failure') // TEST-ONLY
         const dfd = openSync(this.dir, 'r')
         try { fsyncSync(dfd) } finally { closeSync(dfd) }
       } catch { warnings.push('directory sync failed; the rename may not survive a power loss') }
@@ -304,6 +305,7 @@ export class StateStore {
         this.appendMarker({ name: cand.name, sha256: cand.hash, decision: 'accepted' })
       } catch { warnings.push('recovery bookkeeping write failed; the recovery file may be offered once more') }
       try {
+        if (process.env.OPEN_ARC_FAULT_INJECT === 'retire') throw new Error('injected retire failure') // TEST-ONLY
         renameSync(cand.path, this.uniquePath(`${cand.path}.accepted-${stamp()}`))
       } catch { warnings.push(`recovery file ${cand.name} left in place (retire failed); its contents are already committed`) }
       this.pendingCandidate = null

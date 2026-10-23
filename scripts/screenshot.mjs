@@ -30,6 +30,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'shots')
 const profile = mkdtempSync(join(tmpdir(), 'open-arc-smoke-'))
 
+mkdirSync(outDir, { recursive: true })
+for (const f of readdirSync(outDir)) if (f.startsWith('report-')) rmSync(join(outDir, f), { force: true })
+
 if (!existsSync(join(root, 'out/main/index.js'))) {
   console.error('out/ not found - run `npm run build` first')
   process.exit(1)
@@ -109,14 +112,14 @@ chmodSync(stateDir, 0o555)
 const quaranCode = savefailCode === 0 ? await launch('quaranfail', { OPEN_ARC_PLANTED_GARBAGE: garbage }) : 1
 chmodSync(stateDir, 0o755) // restore so the profile can be cleaned up
 // The unreadable original must survive as a quarantined copy, byte-for-byte.
-let preserved = false
-let preserveDetail = 'no quarantine file'
-try {
+let preserved = quaranCode !== 0 // not evaluated when quaranfail never ran (cascade)
+let preserveDetail = quaranCode !== 0 ? 'skipped (quaranfail did not run)' : 'no quarantine file'
+if (quaranCode === 0) try {
   const q = readdirSync(stateDir).filter((f) => f.startsWith('state.json.corrupt-'))
   preserved = q.length === 1 && readFileSync(join(stateDir, q[0]), 'utf8') === garbage
   preserveDetail = q.length + ' quarantine file(s), bytes ' + (preserved ? 'match' : 'MISMATCH')
 } catch (e) { preserveDetail = String(e) }
-console.log((preserved ? 'PASS' : 'FAIL') + '  recovery: quarantined original bytes preserved  (' + preserveDetail + ')')
+if (quaranCode === 0) console.log((preserved ? 'PASS' : 'FAIL') + '  recovery: quarantined original bytes preserved  (' + preserveDetail + ')')
 // .fresh restart-recovery phases: each boots a purpose-planted profile
 // through the real app. FIXED_NOW is TEST-ONLY fault injection that makes
 // timestamped names deterministic (EISDIR via pre-created directories).
@@ -172,11 +175,38 @@ const quarclobberCode = await launchFresh('quarclobber', (d) => {
   writeFileSync(join(d, 'state.json'), 'clobber garbage')
   writeFileSync(join(d, `state.json.corrupt-${FIXED_STAMP}`), 'older backup sentinel') // existing backup FILE: must not be clobbered
 }, { OPEN_ARC_FIXED_NOW: FIXED_NOW }, renamefailCode)
+const freshDirsyncCode = await launchFresh('freshdirsync', (d) => {
+  writeFileSync(join(d, 'state.json'), mkValid('Dirsync Original'))
+  writeFileSync(join(d, F3), mkValid('Dirsync Space'))
+}, { OPEN_ARC_FAULT_INJECT: 'dirsync' }, quarclobberCode)
+const freshRetireCode = await launchFresh('freshretire', (d) => {
+  writeFileSync(join(d, 'state.json'), mkValid('Retire Original'))
+  writeFileSync(join(d, F3), mkValid('Retire Space'))
+}, { OPEN_ARC_FAULT_INJECT: 'retire' }, freshDirsyncCode)
+// markerfail + reoffer share one profile across two boots: marker write
+// blocked by a DIRECTORY at the log path, retire also fails (injected);
+// then the runner diverges state.json and reboots with no faults.
+let freshMarkerfailCode = 1
+let freshReofferCode = 1
+if (freshRetireCode === 0) {
+  const prof = mkdtempSync(join(tmpdir(), 'open-arc-fresh-'))
+  const sdir = join(prof, 'open-arc')
+  mkdirSync(sdir, { recursive: true })
+  writeFileSync(join(sdir, 'state.json'), mkValid('Marker Original'))
+  writeFileSync(join(sdir, F3), mkValid('Marker Space'))
+  mkdirSync(join(sdir, 'state.json.recovery-log')) // DIRECTORY: marker append fails EISDIR
+  freshMarkerfailCode = await launch('freshmarkerfail', { OPEN_ARC_USER_DATA: prof, OPEN_ARC_FAULT_INJECT: 'retire' })
+  if (freshMarkerfailCode === 0) {
+    writeFileSync(join(sdir, 'state.json'), mkValid('Diverged Work')) // later normal saves diverge
+    freshReofferCode = await launch('freshreoffer', { OPEN_ARC_USER_DATA: prof })
+  }
+  rmSync(prof, { recursive: true, force: true })
+}
 
 rmSync(profile, { recursive: true, force: true })
 
-let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || freshAcceptCode !== 0 || freshRejectCode !== 0 || freshMalformedCode !== 0 || freshWritefailCode !== 0 || freshInterruptedCode !== 0 || renamefailCode !== 0 || quarclobberCode !== 0 || !preserved
-for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json', 'report-freshaccept.json', 'report-freshreject.json', 'report-freshmalformed.json', 'report-freshwritefail.json', 'report-freshinterrupted.json', 'report-renamefail.json', 'report-quarclobber.json']) {
+let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || freshAcceptCode !== 0 || freshRejectCode !== 0 || freshMalformedCode !== 0 || freshWritefailCode !== 0 || freshInterruptedCode !== 0 || renamefailCode !== 0 || quarclobberCode !== 0 || freshDirsyncCode !== 0 || freshRetireCode !== 0 || freshMarkerfailCode !== 0 || freshReofferCode !== 0 || !preserved
+for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json', 'report-freshaccept.json', 'report-freshreject.json', 'report-freshmalformed.json', 'report-freshwritefail.json', 'report-freshinterrupted.json', 'report-renamefail.json', 'report-quarclobber.json', 'report-freshdirsync.json', 'report-freshretire.json', 'report-freshmarkerfail.json', 'report-freshreoffer.json']) {
   const r = report(file)
   if (!r) { console.error(`[smoke] missing ${file}`); failed = true; continue }
   for (const c of r.checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)

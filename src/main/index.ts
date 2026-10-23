@@ -726,12 +726,12 @@ class OpenArcApp {
 
       writeFileSync(`${dir}/overlay-verify.json`, JSON.stringify(facts, null, 2))
       console.log('[openarc] overlay-verify done', JSON.stringify(facts))
-      app.exit(0)
+      this.exitSelfTest(0)
     } catch (e) {
       facts.error = String(e)
       writeFileSync(`${dir}/overlay-verify.json`, JSON.stringify(facts, null, 2))
       console.error('[openarc] overlay-verify failed', e)
-      app.exit(1)
+      this.exitSelfTest(1)
     }
   }
 
@@ -744,6 +744,19 @@ class OpenArcApp {
    * No effect in normal use.
    */
   private selfTestStarted = false
+
+  /** SelfTest teardown: app.exit first; if Electron fails to terminate
+   *  (observed intermittently after the report is written), say so loudly
+   *  and fall back to process.exit. The phase result always comes from the
+   *  written report, never from how the process died. */
+  private exitSelfTest(code: number): void {
+    console.log(`[openarc] selfTest exiting with code ${code}`)
+    app.exit(code)
+    setTimeout(() => {
+      console.error(`[openarc] app.exit(${code}) did not terminate the process within 5s; falling back to process.exit`)
+      process.exit(code)
+    }, 5000).unref()
+  }
 
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
@@ -803,7 +816,7 @@ class OpenArcApp {
       )
       await shot('6-relaunch-restored')
       writeFileSync(`${dir}/report-verify.json`, JSON.stringify({ phase: 'verify', checks }, null, 2))
-      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
       return
     }
 
@@ -839,7 +852,7 @@ class OpenArcApp {
       const rcLoaded = await pollUntil(() => rcTab.title === 'Example Domain', 15000)
       check('recovery: app functional after recovery', rcLoaded, `title="${rcTab.title}"`)
       writeFileSync(`${dir}/report-${process.env.OPEN_ARC_PHASE}.json`, JSON.stringify({ phase: process.env.OPEN_ARC_PHASE, checks }, null, 2))
-      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
       return
     }
 
@@ -894,11 +907,11 @@ class OpenArcApp {
         check('quaranfail: error clears after recovery save', await pollUntil(() => this.store.lastSaveError === null, 4000))
       }
       writeFileSync(`${dir}/report-${process.env.OPEN_ARC_PHASE}.json`, JSON.stringify({ phase: process.env.OPEN_ARC_PHASE, checks }, null, 2))
-      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
       return
     }
 
-    if (process.env.OPEN_ARC_PHASE?.startsWith('fresh') || process.env.OPEN_ARC_PHASE === 'renamefail' || process.env.OPEN_ARC_PHASE === 'quarclobber') {
+    if (process.env.OPEN_ARC_PHASE?.startsWith('fresh') || process.env.OPEN_ARC_PHASE === 'renamefail' || process.env.OPEN_ARC_PHASE === 'quarclobber' || process.env.OPEN_ARC_PHASE === 'freshreoffer') {
       // .fresh restart-recovery phases: the runner planted each profile
       // BEFORE launch. Choices are driven through applyRecoveryChoice - the
       // exact path the dialog's buttons use.
@@ -998,6 +1011,36 @@ class OpenArcApp {
         check('freshinterrupted: leftover recognized as committed in the log', logText.includes(F3) && logText.includes('"accepted"'), logText || '(empty)')
         const res = this.applyRecoveryChoice(true)
         check('freshinterrupted: accepting the different candidate commits', res.ok && (read('state.json') ?? '').includes('Other Space'), res.error ?? '')
+      } else if (phase === 'freshdirsync' || phase === 'freshretire' || phase === 'freshmarkerfail') {
+        // Post-commit failure legs: injected AFTER the atomic replace, so
+        // every result must be committed-with-warning, never a rollback.
+        const origBytes = read('state.json')
+        const candBytes = read(F3)
+        const res = this.applyRecoveryChoice(true)
+        check(`${phase}: recovery commits`, res.ok, res.error ?? '')
+        check(`${phase}: committed bytes exactly match candidate`, read('state.json') === candBytes)
+        check(`${phase}: backup of original retained`, files().some((f) => f.startsWith('state.json.corrupt-') && read(f) === origBytes), files().join(','))
+        if (phase === 'freshdirsync') {
+          check('freshdirsync: dirsync failure is a warning, not a failure', (res.warning ?? '').includes('directory sync'), res.warning ?? 'no warning')
+          check('freshdirsync: candidate retired despite the warning', files().some((f) => f.startsWith(F3 + '.accepted-')), files().join(','))
+        } else if (phase === 'freshretire') {
+          check('freshretire: retire failure is committed-with-warning', (res.warning ?? '').includes('left in place'), res.warning ?? 'no warning')
+          check('freshretire: candidate left in place byte-intact', read(F3) === candBytes, files().join(','))
+        } else {
+          check('freshmarkerfail: marker failure is committed-with-warning', (res.warning ?? '').includes('bookkeeping'), res.warning ?? 'no warning')
+          check('freshmarkerfail: candidate left in place byte-intact; marker path untouched', read(F3) === candBytes && files().includes('state.json.recovery-log'), files().join(','))
+        }
+      } else if (phase === 'freshreoffer') {
+        // Second boot over the freshmarkerfail profile after divergence:
+        // the unretired, unbookkept candidate resurfaces as ONE visible
+        // choice (the bounded residual), never an automatic action.
+        const offer = this.store.getRecoveryOffer()
+        check('freshreoffer: diverged unbookkept candidate resurfaces as a visible choice', offer?.candidateName === F3, JSON.stringify(offer))
+        const dialogUp = await pollUntil(async () => { try { return await this.win.webContents.executeJavaScript("!!document.querySelector('.recovery-dialog')") } catch { return false } }, 6000)
+        check('freshreoffer: choice dialog visible again', dialogUp)
+        const res = this.applyRecoveryChoice(false)
+        check('freshreoffer: decline records and retires', res.ok && !files().includes(F3) && files().some((f) => f.startsWith(F3 + '.declined-')), files().join(','))
+        check('freshreoffer: diverged work preserved', (read('state.json') ?? '').includes('Diverged Work'))
       } else if (phase === 'quarclobber') {
         // An older backup FILE already sits at the deterministic name: the
         // quarantine must pick a fresh name, never clobber it.
@@ -1014,7 +1057,7 @@ class OpenArcApp {
         check('renamefail: save redirected to .fresh, original never replaced', landed && read('state.json') === origBytes, files().join(','))
       }
       writeFileSync(`${dir}/report-${phase}.json`, JSON.stringify({ phase, checks }, null, 2))
-      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
       return
     }
 
@@ -1866,7 +1909,7 @@ class OpenArcApp {
     }
 
     writeFileSync(`${dir}/report-run.json`, JSON.stringify({ phase: 'run', checks }, null, 2))
-    app.exit(checks.every((c) => c.pass) ? 0 : 1)
+    this.exitSelfTest(checks.every((c) => c.pass) ? 0 : 1)
   }
 
   private windowControl(action: 'minimize' | 'maximize' | 'fullscreen' | 'close'): void {
