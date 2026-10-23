@@ -1,3 +1,4 @@
+import type { ShortcutAction } from './shortcuts'
 /** Shared model types: the contract between main process, preload and renderer. */
 
 export interface TabItem {
@@ -94,7 +95,9 @@ export interface OpenArcApi {
   toggleReader(): Promise<string>
   printToPdf(): Promise<string | null>
   toggleSidebar(): void
-  windowControl(action: 'minimize' | 'maximize' | 'close'): void
+  windowControl(action: 'minimize' | 'maximize' | 'fullscreen' | 'close'): void
+  /** App shortcut forwarded by main when a page (WebContentsView) had keyboard focus. */
+  onShortcut(cb: (action: ShortcutAction, arg?: string) => void): () => void
 
   runCommand(commandId: string, arg?: string): void
   listCommands(): Promise<CommandDef[]>

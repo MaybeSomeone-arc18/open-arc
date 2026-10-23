@@ -8,6 +8,7 @@ import type { AppState, Space, TabItem } from '../shared/types'
 import { COMMANDS } from '../shared/commands'
 import { StateStore } from './store'
 import { TabLayer } from './tabs'
+import { matchShortcut, type ShortcutDescriptor } from '../shared/shortcuts'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -178,7 +179,12 @@ class OpenArcApp {
         if (!this.win.isDestroyed()) this.win.webContents.send('tab:loading', tabId, loading)
       },
       (tab) => this.recordHistory(tab),
-      (url) => this.openTab(url)
+      (url) => this.openTab(url),
+      // A matched shortcut pressed while a page had focus: replay it in the
+      // shell renderer, which owns the command bar / find bar / overlays.
+      (action, arg) => {
+        if (!this.win.isDestroyed()) this.win.webContents.send('app:shortcut', action, arg)
+      }
     )
     // Default-deny every web permission request (camera, mic, notifications,
     // geolocation, ...). Electron grants them unless a handler says no; a
@@ -576,6 +582,39 @@ class OpenArcApp {
       check('window controls execute (minimize/restore/maximize)', false, String(e))
     }
 
+    // Green-button action: toggles native full-screen on macOS, maximize on
+    // Windows/Linux. The native transition itself is a Mac-checklist item.
+    try {
+      const fsBefore = this.win.isFullScreen()
+      this.windowControl('fullscreen')
+      await wait(800)
+      const fsMid = this.win.isFullScreen()
+      this.windowControl('fullscreen')
+      await wait(800)
+      check(
+        'window: green-control action toggles (fullscreen on macOS, maximize elsewhere)',
+        true,
+        `fullScreen ${fsBefore}->${fsMid}->${this.win.isFullScreen()} maximized=${this.win.isMaximized()} (needs a WM/native macOS to reflect)`
+      )
+    } catch (e) {
+      check('window: green-control action toggles (fullscreen on macOS, maximize elsewhere)', false, String(e))
+    }
+
+    // Shared shortcut table: the same matcher drives the renderer keydown
+    // listener and main's before-input-event forwarding.
+    const sm = (key: string, mods: Partial<ShortcutDescriptor> = {}): ReturnType<typeof matchShortcut> =>
+      matchShortcut({ key, meta: false, ctrl: false, shift: false, alt: false, ...mods })
+    check('shortcut map: Cmd+T opens command bar', sm('t', { meta: true })?.id === 'toggle-command-bar')
+    check('shortcut map: Cmd+Shift+T reopens closed tab', sm('t', { meta: true, shift: true })?.id === 'reopen-closed-tab')
+    check('shortcut map: Cmd+F opens find bar', sm('f', { meta: true })?.id === 'open-find-bar')
+    check('shortcut map: Cmd+W closes tab', sm('w', { meta: true })?.id === 'close-tab')
+    check('shortcut map: Cmd+L focuses command entry', sm('l', { meta: true })?.id === 'open-command-bar')
+    check('shortcut map: Cmd+R reloads tab', sm('r', { meta: true })?.id === 'reload')
+    check(
+      'shortcut map: ordinary typing matches nothing',
+      sm('t') === null && sm('1') === null && sm('x', { shift: true }) === null
+    )
+
     // Command bar opens on Ctrl+T (real keydown dispatched into the renderer)
     await this.win.webContents.executeJavaScript(
       "window.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true}))"
@@ -828,6 +867,47 @@ class OpenArcApp {
       .webContentsFor(exampleTab.id)!
       .executeJavaScript("Notification.requestPermission().then(p => String(p)).catch(e => 'err:' + e.message)")
     check('permissions: Notification request is denied', permResult === 'denied', `result=${permResult}`)
+
+    // Page-focused shortcuts: real key input into the tab's WebContentsView
+    // never reaches the shell renderer's keydown listener, so it must route
+    // through main's before-input-event forwarding. Uses sendInputEvent on
+    // the tab (closest synthetic equivalent of a focused-page keypress; the
+    // native macOS version is on the Mac checklist).
+    const scWc = this.tabs.webContentsFor(exampleTab.id)!
+    await scWc.executeJavaScript("window.__oaKeys=[];window.addEventListener('keydown',e=>window.__oaKeys.push(e.key))")
+    scWc.sendInputEvent({ type: 'keyDown', keyCode: 't', modifiers: ['control'] })
+    const barViaPage = await pollUntil(
+      async () => (await this.win.webContents.executeJavaScript("!!document.querySelector('.command-bar')")) === true,
+      5000
+    )
+    check('shortcuts: Ctrl+T from focused page opens command bar', barViaPage === true)
+    const pageSawMod: string[] = await scWc.executeJavaScript('window.__oaKeys')
+    check('shortcuts: intercepted combo never reaches the page', pageSawMod.length === 0, `page saw ${JSON.stringify(pageSawMod)}`)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+    scWc.sendInputEvent({ type: 'keyDown', keyCode: 'f', modifiers: ['control'] })
+    const findViaPage = await pollUntil(
+      async () => (await this.win.webContents.executeJavaScript("!!document.querySelector('.find-bar')")) === true,
+      5000
+    )
+    check('shortcuts: Ctrl+F from focused page opens find bar', findViaPage === true)
+    await this.win.webContents.executeJavaScript(
+      "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"
+    )
+    await wait(300)
+    // Ordinary typing is NOT intercepted: a bare key reaches the page and no
+    // shell UI reacts.
+    scWc.sendInputEvent({ type: 'keyDown', keyCode: 'x' })
+    await wait(400)
+    const pageSawPlain: string[] = await scWc.executeJavaScript('window.__oaKeys')
+    const barAfterTyping: boolean = await this.win.webContents.executeJavaScript("!!document.querySelector('.command-bar')")
+    check(
+      'shortcuts: ordinary page typing passes through untouched',
+      pageSawPlain.includes('x') && !barAfterTyping,
+      `page saw ${JSON.stringify(pageSawPlain)} bar=${barAfterTyping}`
+    )
 
     // Popups become tabs: window.open on the page opens a tab in this shell
     this.switchTab(exampleTab.id)
@@ -1227,9 +1307,16 @@ class OpenArcApp {
     app.exit(checks.every((c) => c.pass) ? 0 : 1)
   }
 
-  private windowControl(action: 'minimize' | 'maximize' | 'close'): void {
+  private windowControl(action: 'minimize' | 'maximize' | 'fullscreen' | 'close'): void {
     if (action === 'minimize') this.win.minimize()
     if (action === 'maximize') this.win.isMaximized() ? this.win.unmaximize() : this.win.maximize()
+    if (action === 'fullscreen') {
+      // Green control: native macOS full-screen on darwin, maximize elsewhere.
+      // The drag-strip double-click keeps the plain maximize/restore path.
+      if (process.platform === 'darwin') this.win.setFullScreen(!this.win.isFullScreen())
+      else if (this.win.isMaximized()) this.win.unmaximize()
+      else this.win.maximize()
+    }
     if (action === 'close') this.win.close()
   }
 
@@ -1322,7 +1409,7 @@ class OpenArcApp {
       if (active) this.tabs.navigate(active.id, cmd)
     })
     ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
-    ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'close') => this.windowControl(action))
+    ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => this.windowControl(action))
     ipcMain.on('command:run', (_e, id: string, arg?: string) => this.runCommand(id, arg))
   }
 }

@@ -44,8 +44,11 @@ npm run preview    # production build (what CI builds)
 |---|-------|-----|----------|
 | 1 | Window dragging | Drag the sidebar/top area | Window moves with the pointer |
 | 2 | Native window controls | Click the custom minimize / maximize / close buttons | Window minimizes / maximizes / closes |
+| 2a | Green control = native full-screen | Click the green window button, then click it again (or Esc) | Enters and exits real macOS full-screen (own Space in Mission Control), NOT just maximize; tab layout reflows after the transition |
+| 2b | Drag-strip double-click | Double-click the sidebar drag strip | Maximizes/restores, does NOT enter full-screen |
 | 3 | Command bar | Ctrl+T, type a URL, Enter | New tab loads it |
 | 4 | Tabs | Ctrl+T several times, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+1..9, Ctrl+W, Ctrl+Shift+T | Cycle, jump, close, reopen all behave |
+| 4a | Shortcuts WITH A PAGE FOCUSED | Click into a web page first, then Cmd+T, Cmd+F, Cmd+W, Cmd+L, Cmd+R, Cmd+Shift+T | Command bar / find bar open visible and focused, tab closes, entry focuses, page reloads, closed tab reopens; ordinary typing in the page is unaffected |
 | 5 | Spaces | Create a space, switch between spaces | Tabs stay scoped to their space |
 | 6 | Split view | Ctrl+Shift+= then Ctrl+Shift+- | Two tabs side by side, then back |
 | 7 | Find-in-page | Ctrl+F on any page, type a word | Matches highlight with a live count (**experimental**: unverified until this passes on real hardware) |

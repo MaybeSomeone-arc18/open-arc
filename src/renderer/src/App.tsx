@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppState } from '../../shared/types'
+import { matchShortcut, type ShortcutAction } from '../../shared/shortcuts'
 import { Sidebar } from './components/Sidebar'
 import { CommandBar } from './components/CommandBar'
 import { FindBar } from './components/FindBar'
@@ -41,132 +42,77 @@ export function App(): JSX.Element {
         return next
       })
     })
-    const onKey = (e: KeyboardEvent): void => {
-      const mod = e.ctrlKey || e.metaKey
-      if (mod && e.shiftKey && e.key.toLowerCase() === 't') {
-        e.preventDefault()
-        window.openArc.runCommand('reopen-closed-tab')
-      } else if (mod && e.key.toLowerCase() === 't') {
-        e.preventDefault()
-        setCommandBarOpen((v) => !v)
-      }
-      if (mod && e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        window.openArc.toggleSidebar()
-      }
-      if (mod && e.key.toLowerCase() === 'w') {
-        e.preventDefault()
-        window.openArc.runCommand('close-tab')
-      }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'r') {
-        e.preventDefault()
-        window.openArc.runCommand('hard-reload')
-      }
-      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'r') {
+    // One dispatch for both key paths: shell-focused keys arrive via the
+    // window keydown listener below; page-focused keys are matched in main
+    // (before-input-event on the tab's WebContentsView) and arrive via IPC.
+    const runShortcut = (action: ShortcutAction, arg?: string): void => {
+      if (action === 'reopen-closed-tab') window.openArc.runCommand('reopen-closed-tab')
+      if (action === 'toggle-command-bar') setCommandBarOpen((v) => !v)
+      if (action === 'open-command-bar') setCommandBarOpen(true)
+      if (action === 'open-find-bar') setFindBarOpen(true)
+      if (action === 'toggle-shortcuts') setShortcutsOpen((v) => !v)
+      if (action === 'toggle-sidebar') window.openArc.toggleSidebar()
+      if (action === 'close-tab') window.openArc.runCommand('close-tab')
+      if (action === 'hard-reload') window.openArc.runCommand('hard-reload')
+      if (action === 'reload') {
         // Reload the active TAB, never the shell (default menu is removed).
-        e.preventDefault()
         window.openArc.runCommand('reload')
       }
-      if (mod && e.key.toLowerCase() === 'l') {
-        e.preventDefault()
-        setCommandBarOpen(true)
-      }
-      if (mod && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        setFindBarOpen(true)
-      }
-      if (mod && !e.shiftKey && (e.key === '=' || e.key === '+')) {
-        e.preventDefault()
-        applyZoom('in')
-      }
-      if (mod && !e.shiftKey && e.key === '-') {
-        e.preventDefault()
-        applyZoom('out')
-      }
-      if (mod && !e.shiftKey && e.key === '0') {
-        e.preventDefault()
-        applyZoom('reset')
-      }
-      if (mod && !e.shiftKey && e.key.toLowerCase() === 'm') {
-        e.preventDefault()
+      if (action === 'zoom-in') applyZoom('in')
+      if (action === 'zoom-out') applyZoom('out')
+      if (action === 'zoom-reset') applyZoom('reset')
+      if (action === 'toggle-mute') {
         window.openArc.toggleMute().then((muted) => {
           setZoomToast(muted ? 'Tab muted' : 'Tab unmuted')
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
-      if (mod && !e.shiftKey && e.key.toLowerCase() === 'u') {
-        e.preventDefault()
-        window.openArc.runCommand('view-source')
-      }
-      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault()
+      if (action === 'view-source') window.openArc.runCommand('view-source')
+      if (action === 'print-pdf') {
         window.openArc.printToPdf().then((path) => {
           setZoomToast(path ? `Saved PDF: ${path.split('/').pop()}` : 'PDF export failed')
           setTimeout(() => setZoomToast(null), 2500)
         })
       }
-      if (mod && e.altKey && e.key.toLowerCase() === 'r') {
-        e.preventDefault()
+      if (action === 'reader-toggle') {
         window.openArc.toggleReader().then((res) => {
           setZoomToast(res === 'on' ? 'Reader mode on' : res === 'off' ? 'Reader mode off' : 'No readable article found')
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
-      if (e.key === 'F12' || (mod && e.shiftKey && e.key.toLowerCase() === 'i')) {
-        e.preventDefault()
-        window.openArc.toggleDevTools()
-      }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        window.openArc.runCommand('duplicate-tab')
-      }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
-        e.preventDefault()
+      if (action === 'devtools') window.openArc.toggleDevTools()
+      if (action === 'duplicate-tab') window.openArc.runCommand('duplicate-tab')
+      if (action === 'copy-url') {
         window.openArc.copyActiveUrl().then((url) => {
           if (!url) return
           setZoomToast('Copied URL')
           setTimeout(() => setZoomToast(null), 1500)
         })
       }
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
-        e.preventDefault()
-        window.openArc.runCommand('goto-tab', e.key)
-      }
-      if (mod && e.key === 'Tab') {
-        e.preventDefault()
-        window.openArc.runCommand(e.shiftKey ? 'prev-tab' : 'next-tab')
-      }
-      if (e.altKey && e.key === 'ArrowLeft') {
-        e.preventDefault()
-        window.openArc.runCommand('go-back')
-      }
-      if (e.altKey && e.key === 'ArrowRight') {
-        e.preventDefault()
-        window.openArc.runCommand('go-forward')
-      }
-      if (mod && e.key.toLowerCase() === 'd') {
-        e.preventDefault()
-        window.openArc.runCommand('pin-tab')
-      }
-      if (mod && e.shiftKey && (e.key === '+' || e.key === '=')) {
-        e.preventDefault()
-        window.openArc.runCommand('split-view')
-      }
-      if (mod && e.shiftKey && (e.key === '_' || e.key === '-')) {
-        e.preventDefault()
-        window.openArc.runCommand('close-split')
-      }
-      if (mod && e.key === '/') {
-        e.preventDefault()
-        setShortcutsOpen((v) => !v)
-      }
-      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false); setShortcutsOpen(false) }
+      if (action === 'goto-tab' && arg) window.openArc.runCommand('goto-tab', arg)
+      if (action === 'next-tab') window.openArc.runCommand('next-tab')
+      if (action === 'prev-tab') window.openArc.runCommand('prev-tab')
+      if (action === 'go-back') window.openArc.runCommand('go-back')
+      if (action === 'go-forward') window.openArc.runCommand('go-forward')
+      if (action === 'pin-tab') window.openArc.runCommand('pin-tab')
+      if (action === 'split-view') window.openArc.runCommand('split-view')
+      if (action === 'close-split') window.openArc.runCommand('close-split')
+    }
+    const offShortcut = window.openArc.onShortcut((action, arg) => runShortcut(action, arg))
+    const onKey = (e: KeyboardEvent): void => {
+      // Escape stays shell-local: pages own it when a page has focus.
+      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false); setShortcutsOpen(false); return }
+      const m = matchShortcut({ key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey })
+      if (!m) return
+      e.preventDefault()
+      runShortcut(m.id, m.arg)
     }
     window.addEventListener('keydown', onKey)
     return () => {
       off()
       offLoading()
       offDownload()
+      offShortcut()
       if (toastTimer) clearTimeout(toastTimer)
       window.removeEventListener('keydown', onKey)
     }

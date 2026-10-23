@@ -41,6 +41,11 @@ const api: OpenArcApi = {
   printToPdf: () => ipcRenderer.invoke('tab:print-pdf'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
+  onShortcut: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, action: Parameters<typeof cb>[0], arg?: string): void => cb(action, arg)
+    ipcRenderer.on('app:shortcut', listener)
+    return () => ipcRenderer.removeListener('app:shortcut', listener)
+  },
 
   runCommand: (id, arg) => ipcRenderer.send('command:run', id, arg),
   listCommands: () => ipcRenderer.invoke('commands:list') as Promise<CommandDef[]>

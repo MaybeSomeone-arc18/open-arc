@@ -37,7 +37,11 @@ export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props):
       <div className="window-controls">
         <button className="wc close" title="Close" onClick={() => window.openArc.windowControl('close')} />
         <button className="wc minimize" title="Minimize" onClick={() => window.openArc.windowControl('minimize')} />
-        <button className="wc maximize" title="Maximize" onClick={() => window.openArc.windowControl('maximize')} />
+        <button
+          className="wc maximize"
+          title={/Mac/.test(navigator.userAgent) ? 'Full screen' : 'Maximize'}
+          onClick={() => window.openArc.windowControl('fullscreen')}
+        />
       </div>
 
       <div className="url-row">

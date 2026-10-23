@@ -1,6 +1,7 @@
 import { BrowserWindow, Menu, WebContentsView, type Rectangle } from 'electron'
 import { buildPageContextMenu } from './contextmenu'
 import type { Space, TabItem } from '../shared/types'
+import { matchShortcut } from '../shared/shortcuts'
 
 const SIDEBAR_WIDTH = 280
 
@@ -22,12 +23,17 @@ export class TabLayer {
     onTabUpdated: (tab: TabItem) => void,
     onLoading: (tabId: string, loading: boolean) => void = () => {},
     private onNavigate: (tab: TabItem) => void = () => {},
-    private onOpenInNewTab: (url: string) => void = () => {}
+    private onOpenInNewTab: (url: string) => void = () => {},
+    private onShortcut: (action: string, arg?: string) => void = () => {}
   ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
     this.onLoading = onLoading
     win.on('resize', () => this.layout())
+    // macOS full-screen transitions are animated/asynchronous; relayout when
+    // they finish so tab panes track the final content size.
+    win.on('enter-full-screen', () => this.layout())
+    win.on('leave-full-screen', () => this.layout())
   }
 
   setSidebarVisible(visible: boolean): void {
@@ -104,6 +110,25 @@ export class TabLayer {
           document.body.appendChild(box)
         })()`)
         .catch(() => {})
+    })
+    // App shortcuts must work while the PAGE has keyboard focus: key events
+    // inside this view never reach the shell renderer's keydown listener.
+    // Matched combos are consumed here and forwarded to the shell; everything
+    // else (ordinary typing, page-owned combos) passes through untouched.
+    // Attached only to tab views, never the shell webContents, so each key is
+    // handled by exactly one path.
+    view.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const m = matchShortcut({
+        key: input.key,
+        meta: !!input.meta,
+        ctrl: !!input.control,
+        shift: !!input.shift,
+        alt: !!input.alt
+      })
+      if (!m) return
+      event.preventDefault()
+      this.onShortcut(m.id, m.arg)
     })
     view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
     view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
