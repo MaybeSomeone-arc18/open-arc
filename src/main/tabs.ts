@@ -42,17 +42,38 @@ export class TabLayer {
   }
 
   private attachedIds: string[] = []
+  /** Shell overlays: modals cover the page area (views hidden, since child
+   * views composite above the shell DOM); the find bar needs the page to
+   * stay visible, so views shrink to a reserved strip at the top instead. */
+  private modalOpen = false
+  private findBarOpen = false
+  private static FIND_BAR_INSET = 48
+
+  setOverlayState(modal: boolean, findBar: boolean): void {
+    this.modalOpen = modal
+    this.findBarOpen = findBar
+    this.applyOverlayState()
+    this.layout()
+  }
+
+  private applyOverlayState(): void {
+    for (const id of this.attachedIds) {
+      const view = this.views.get(id)
+      if (view && this.win.contentView.children.includes(view)) view.setVisible(!this.modalOpen)
+    }
+  }
 
   private layout(): void {
     const [w, h] = this.win.getContentSize()
     const x = this.sidebarVisible ? SIDEBAR_WIDTH : 0
     const width = Math.max(0, w - x)
+    const top = this.findBarOpen && !this.modalOpen ? TabLayer.FIND_BAR_INSET : 0
     const n = this.attachedIds.length || 1
     this.attachedIds.forEach((id, i) => {
       const view = this.views.get(id)
       if (!view) return
       const paneWidth = Math.floor(width / n)
-      view.setBounds({ x: x + i * paneWidth, y: 0, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: h })
+      view.setBounds({ x: x + i * paneWidth, y: top, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: Math.max(0, h - top) })
     })
   }
 
@@ -174,9 +195,15 @@ export class TabLayer {
       if (!this.win.contentView.children.includes(view)) {
         this.win.contentView.addChildView(view)
       }
+      if (this.modalOpen) view.setVisible(false)
       if (!this.attachedIds.includes(tab.id)) this.attachedIds.push(tab.id)
     }
     this.layout()
+  }
+
+  focusTab(tabId: string): void {
+    const view = this.views.get(tabId)
+    if (view && this.win.contentView.children.includes(view)) view.webContents.focus()
   }
 
   close(tabId: string): void {

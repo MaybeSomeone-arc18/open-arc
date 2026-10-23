@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session, clipboard } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, clipboard } from 'electron'
 import { readerToggle } from './reader'
 import { buildPageContextMenu } from './contextmenu'
 import { join } from 'node:path'
@@ -497,6 +497,82 @@ class OpenArcApp {
   }
 
   /**
+   * Overlay z-order/focus verification (OPEN_ARC_OVERLAY_VERIFY set, with
+   * OPEN_ARC_SHOT_DIR): captures the COMPOSITED screen via desktopCapturer
+   * (what a real display would show - the only capture that includes both the
+   * shell DOM and tab WebContentsViews), while driving shortcuts through real
+   * input events into a focused page view. Proves or disproves that overlays
+   * are actually visible above pages and that focus moves shell<->page.
+   */
+  private async overlayVerify(dir: string): Promise<void> {
+    const { writeFileSync, mkdirSync } = await import('node:fs')
+    mkdirSync(dir, { recursive: true })
+    const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+    const facts: Record<string, unknown> = {}
+    const capture = async (name: string): Promise<void> => {
+      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 840 } })
+      if (!sources.length || sources[0].thumbnail.isEmpty()) throw new Error('no screen source for composited capture')
+      writeFileSync(`${dir}/${name}.png`, sources[0].thumbnail.toPNG())
+    }
+    const shellJs = (code: string): Promise<unknown> => this.win.webContents.executeJavaScript(code)
+    try {
+      this.openTab('https://example.com/')
+      const tab = this.activeTab()!
+      const end = Date.now() + 15000
+      while (tab.title !== 'Example Domain' && Date.now() < end) await wait(250)
+      const wc = this.tabs.webContentsFor(tab.id)!
+      this.tabs.focusTab(tab.id) // simulate the user having clicked into the page
+      await wait(400)
+      await capture('overlay-0-page-only')
+      facts.pageFocusedBefore = wc.isFocused()
+
+      wc.sendInputEvent({ type: 'keyDown', keyCode: 't', modifiers: ['control'] })
+      await wait(900)
+      await capture('overlay-1-commandbar')
+      facts.commandBarInDom = await shellJs("!!document.querySelector('.command-bar')")
+      facts.commandBarActiveElement = await shellJs("document.activeElement ? (document.activeElement.tagName + '.' + document.activeElement.className) : 'none'")
+      facts.shellFocusedAfterOpen = this.win.webContents.isFocused()
+      facts.pageFocusedAfterOpen = wc.isFocused()
+
+      // Close via shell-side Escape (the focus is in the shell now)
+      await shellJs("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+      await wait(600)
+      await capture('overlay-2-after-escape')
+      facts.pageFocusedAfterEscape = wc.isFocused()
+
+      wc.sendInputEvent({ type: 'keyDown', keyCode: 'f', modifiers: ['control'] })
+      await wait(900)
+      await capture('overlay-3-findbar')
+      facts.findBarInDom = await shellJs("!!document.querySelector('.find-bar')")
+      facts.findBarActiveElement = await shellJs("document.activeElement ? (document.activeElement.tagName + '.' + document.activeElement.className) : 'none'")
+      facts.shellFocusedAfterFind = this.win.webContents.isFocused()
+
+      // Type a query: focus is in the shell find input, so real shell keys work
+      await shellJs(
+        "(()=>{const i=document.querySelector('.find-bar input'); if(!i) return 'NO-INPUT';" +
+          "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(i,'Example');" +
+          "i.dispatchEvent(new Event('input',{bubbles:true})); return 'OK'})()"
+      )
+      await wait(900)
+      await capture('overlay-4-findbar-typed')
+
+      await shellJs("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+      await wait(600)
+      await capture('overlay-5-restored')
+      facts.pageFocusedAtEnd = wc.isFocused()
+      facts.overlayCountAtEnd = await shellJs("document.querySelectorAll('.command-bar,.find-bar,.shortcuts-overlay').length")
+      writeFileSync(`${dir}/overlay-verify.json`, JSON.stringify(facts, null, 2))
+      console.log('[openarc] overlay-verify done', JSON.stringify(facts))
+      app.exit(0)
+    } catch (e) {
+      facts.error = String(e)
+      writeFileSync(`${dir}/overlay-verify.json`, JSON.stringify(facts, null, 2))
+      console.error('[openarc] overlay-verify failed', e)
+      app.exit(1)
+    }
+  }
+
+  /**
    * Verification harness (OPEN_ARC_SHOT_DIR set): drives the real app through
    * the smoke suite - window controls, command bar, navigation, tab switching,
    * spaces, split view, auto-archive - captures genuine screenshots and writes
@@ -507,6 +583,7 @@ class OpenArcApp {
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
     if (!dir) return
+    if (process.env.OPEN_ARC_OVERLAY_VERIFY) return this.overlayVerify(dir)
     const { writeFileSync, mkdirSync } = await import('node:fs')
     mkdirSync(dir, { recursive: true })
     const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -1410,6 +1487,17 @@ class OpenArcApp {
     })
     ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
     ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => this.windowControl(action))
+    ipcMain.on('app:overlay', (_e, modal: boolean, findBar: boolean) => {
+      if (!this.win.isDestroyed()) this.tabs.setOverlayState(!!modal, !!findBar)
+    })
+    ipcMain.on('app:focus', (_e, which: 'shell' | 'page') => {
+      if (this.win.isDestroyed()) return
+      if (which === 'shell') this.win.webContents.focus()
+      else {
+        const t = this.activeTab()
+        if (t) this.tabs.focusTab(t.id)
+      }
+    })
     ipcMain.on('command:run', (_e, id: string, arg?: string) => this.runCommand(id, arg))
   }
 }

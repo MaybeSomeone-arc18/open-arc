@@ -51,7 +51,7 @@ npm run preview    # production build (what CI builds)
 | 4a | Shortcuts WITH A PAGE FOCUSED | Click into a web page first, then Cmd+T, Cmd+F, Cmd+W, Cmd+L, Cmd+R, Cmd+Shift+T | Command bar / find bar open visible and focused, tab closes, entry focuses, page reloads, closed tab reopens; ordinary typing in the page is unaffected |
 | 5 | Spaces | Create a space, switch between spaces | Tabs stay scoped to their space |
 | 6 | Split view | Ctrl+Shift+= then Ctrl+Shift+- | Two tabs side by side, then back |
-| 7 | Find-in-page | Ctrl+F on any page, type a word | Matches highlight with a live count (**experimental**: unverified until this passes on real hardware) |
+| 7 | Find-in-page | Ctrl+F on any page, type a word | Page shifts down under a top strip holding the find bar; matches highlight with a live count (**experimental**: bar+layout verified in composited captures, match event unverified until real hardware) |
 | 8 | Context menu | Right-click a link and an image | Native menu with open/copy items (**experimental**: items verified headless, the popup itself is not) |
 | 9 | Downloads | Download any file | Lands in ~/Downloads with a completion toast |
 | 10 | Save as PDF | Ctrl+P on any page | PDF written to ~/Downloads, opens in Preview |

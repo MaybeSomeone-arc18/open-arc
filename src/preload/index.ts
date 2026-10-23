@@ -41,6 +41,9 @@ const api: OpenArcApi = {
   printToPdf: () => ipcRenderer.invoke('tab:print-pdf'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
+  focusShell: () => ipcRenderer.send('app:focus', 'shell'),
+  focusPage: () => ipcRenderer.send('app:focus', 'page'),
+  setOverlayState: (modal, findBar) => ipcRenderer.send('app:overlay', modal, findBar),
   onShortcut: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, action: Parameters<typeof cb>[0], arg?: string): void => cb(action, arg)
     ipcRenderer.on('app:shortcut', listener)

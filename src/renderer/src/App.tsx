@@ -47,10 +47,10 @@ export function App(): JSX.Element {
     // (before-input-event on the tab's WebContentsView) and arrive via IPC.
     const runShortcut = (action: ShortcutAction, arg?: string): void => {
       if (action === 'reopen-closed-tab') window.openArc.runCommand('reopen-closed-tab')
-      if (action === 'toggle-command-bar') setCommandBarOpen((v) => !v)
-      if (action === 'open-command-bar') setCommandBarOpen(true)
-      if (action === 'open-find-bar') setFindBarOpen(true)
-      if (action === 'toggle-shortcuts') setShortcutsOpen((v) => !v)
+      if (action === 'toggle-command-bar') { setCommandBarOpen((v) => !v); focusAfterToggle('.command-bar') }
+      if (action === 'open-command-bar') { setCommandBarOpen(true); window.openArc.focusShell() }
+      if (action === 'open-find-bar') { setFindBarOpen(true); window.openArc.focusShell() }
+      if (action === 'toggle-shortcuts') { setShortcutsOpen((v) => !v); focusAfterToggle('.shortcuts-overlay') }
       if (action === 'toggle-sidebar') window.openArc.toggleSidebar()
       if (action === 'close-tab') window.openArc.runCommand('close-tab')
       if (action === 'hard-reload') window.openArc.runCommand('hard-reload')
@@ -98,10 +98,20 @@ export function App(): JSX.Element {
       if (action === 'split-view') window.openArc.runCommand('split-view')
       if (action === 'close-split') window.openArc.runCommand('close-split')
     }
+    const focusAfterToggle = (selector: string): void => {
+      setTimeout(() => {
+        if (document.querySelector(selector)) window.openArc.focusShell()
+        else window.openArc.focusPage()
+      }, 50)
+    }
     const offShortcut = window.openArc.onShortcut((action, arg) => runShortcut(action, arg))
     const onKey = (e: KeyboardEvent): void => {
       // Escape stays shell-local: pages own it when a page has focus.
-      if (e.key === 'Escape') { setCommandBarOpen(false); setFindBarOpen(false); setShortcutsOpen(false); return }
+      if (e.key === 'Escape') {
+        setCommandBarOpen(false); setFindBarOpen(false); setShortcutsOpen(false)
+        window.openArc.focusPage()
+        return
+      }
       const m = matchShortcut({ key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey })
       if (!m) return
       e.preventDefault()
@@ -118,7 +128,16 @@ export function App(): JSX.Element {
     }
   }, [])
 
-  const closeCommandBar = useCallback(() => setCommandBarOpen(false), [])
+  // Keep main informed so tab views never cover shell overlays: modals hide
+  // the page views, the find bar reserves a top strip and keeps pages visible.
+  useEffect(() => {
+    window.openArc.setOverlayState(commandBarOpen || shortcutsOpen, findBarOpen)
+  }, [commandBarOpen, shortcutsOpen, findBarOpen])
+
+  const closeCommandBar = useCallback(() => {
+    setCommandBarOpen(false)
+    window.openArc.focusPage()
+  }, [])
 
   if (!state) return <div className="boot">Loading…</div>
   const space = state.spaces.find((s) => s.id === state.activeSpaceId) ?? state.spaces[0]
@@ -127,8 +146,8 @@ export function App(): JSX.Element {
     <div className="app" style={{ ['--space-color' as string]: space.color }}>
       {state.sidebarVisible && <Sidebar state={state} space={space} loadingTabs={loadingTabs} onOpenCommandBar={() => setCommandBarOpen(true)} />}
       {commandBarOpen && <CommandBar state={state} onClose={closeCommandBar} />}
-      {findBarOpen && <FindBar onClose={() => setFindBarOpen(false)} />}
-      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+      {findBarOpen && <FindBar onClose={() => { setFindBarOpen(false); window.openArc.focusPage() }} />}
+      {shortcutsOpen && <ShortcutsOverlay onClose={() => { setShortcutsOpen(false); window.openArc.focusPage() }} />}
       {downloadToast && <div className="download-toast">{downloadToast}</div>}
       {zoomToast && <div className="download-toast">{zoomToast}</div>}
       {!state.sidebarVisible && (

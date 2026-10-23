@@ -96,6 +96,11 @@ export interface OpenArcApi {
   printToPdf(): Promise<string | null>
   toggleSidebar(): void
   windowControl(action: 'minimize' | 'maximize' | 'fullscreen' | 'close'): void
+  /** Move keyboard focus to the shell UI (overlay opened) or back to the active page (overlay closed). */
+  focusShell(): void
+  focusPage(): void
+  /** Shell overlay state, so main can keep tab views from covering them. */
+  setOverlayState(modal: boolean, findBar: boolean): void
   /** App shortcut forwarded by main when a page (WebContentsView) had keyboard focus. */
   onShortcut(cb: (action: ShortcutAction, arg?: string) => void): () => void
 
