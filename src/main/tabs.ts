@@ -3,6 +3,7 @@ import { buildPageContextMenu } from './contextmenu'
 import type { Space, TabItem } from '../shared/types'
 import { matchShortcut } from '../shared/shortcuts'
 import { computeSplitPaneBounds, DIVIDER_WIDTH, MIN_PANE_WIDTH, type SplitPaneBounds } from '../shared/splitGeometry'
+import { CrashGate, isCrashReason, crashedPageUrl } from './recovery'
 
 const SIDEBAR_WIDTH = 280
 
@@ -14,6 +15,11 @@ const SIDEBAR_WIDTH = 280
  */
 export class TabLayer {
   private views = new Map<string, WebContentsView>()
+  private crashGate = new CrashGate()
+  /** tabId -> real URL of a tab that is showing the crashed page. */
+  private crashedUrl = new Map<string, string>()
+  /** Count of renderer crashes seen (smoke suite + dev logs). */
+  crashEvents: string[] = []
   private win: BrowserWindow
   private sidebarVisible = true
   private onTabUpdated: (tab: TabItem) => void
@@ -223,6 +229,20 @@ export class TabLayer {
     view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
     view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
     view.webContents.on('focus', () => this.onTabFocused(tab.id))
+    view.webContents.on('render-process-gone', (_e, details) => {
+      if (!isCrashReason(details.reason)) return
+      const url = this.crashedUrl.get(tab.id) ?? (tab.url || view.webContents.getURL())
+      if (this.views.get(tab.id) !== view || view.webContents.isDestroyed()) return
+      if (this.crashGate.shouldAutoRecover(tab.id)) {
+        this.crashEvents.push(`${tab.id}:reload:${details.reason}`)
+        this.crashedUrl.delete(tab.id)
+        view.webContents.reload()
+      } else {
+        this.crashEvents.push(`${tab.id}:page:${details.reason}`)
+        this.crashedUrl.set(tab.id, url)
+        void view.webContents.loadURL(crashedPageUrl(url, details.reason)).catch(() => {})
+      }
+    })
     const push = (): void => {
       tab.title = view.webContents.getTitle() || tab.url
       this.onTabUpdated({ ...tab, title: tab.title })
@@ -451,6 +471,12 @@ export class TabLayer {
     if (!wc) return
     if (command === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
     if (command === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
+    const crashed = this.crashedUrl.get(tabId)
+    if ((command === 'reload' || command === 'hard-reload') && crashed) {
+      this.crashedUrl.delete(tabId)
+      void wc.loadURL(crashed).catch(() => {})
+      return
+    }
     if (command === 'reload') wc.reload()
     if (command === 'hard-reload') wc.reloadIgnoringCache()
   }

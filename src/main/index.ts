@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, clipboard } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, session, clipboard } from 'electron'
 import { readerToggle } from './reader'
 import { buildPageContextMenu } from './contextmenu'
 import { basename, extname, join } from 'node:path'
@@ -9,6 +9,8 @@ import { COMMANDS } from '../shared/commands'
 import { StateStore } from './store'
 import { TabLayer } from './tabs'
 import { matchShortcut, type ShortcutDescriptor } from '../shared/shortcuts'
+import { CrashGate, isCrashReason } from './recovery'
+import { isTrustedSender, installPermissionPolicy, str, id as idv, oneOf, commandId, userUrl, type TrustConfig } from './security'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -99,6 +101,19 @@ class OpenArcApp {
   /** Load start/stop markers, used by the smoke suite (and handy in dev logs). */
   private loadingEvents: string[] = []
   private downloadsDone: { filename: string; path: string; state: string }[] = []
+  private crashDialogOpen = false
+  lastCrashDialogDetail = ''
+
+  /** Persist state without ever throwing; false means the write failed and the previous copy on disk is untouched. */
+  private flushStateSafely(): boolean {
+    try {
+      this.store.flush(this.state)
+      return true
+    } catch (err) {
+      console.log(`[openarc] state flush failed: ${(err as Error).message}`)
+      return false
+    }
+  }
 
   constructor() {
     this.state = migrate(this.store.load() ?? defaultState())
@@ -204,9 +219,7 @@ class OpenArcApp {
     // Default-deny every web permission request (camera, mic, notifications,
     // geolocation, ...). Electron grants them unless a handler says no; a
     // browser shell must decide deliberately. No prompts exist yet, so deny.
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false)
-    })
+    installPermissionPolicy(session.defaultSession)
 
     // A failed debounced save must become an explicit signal, not silence.
     this.store.onSaveError = (saveErr) => {
@@ -218,7 +231,7 @@ class OpenArcApp {
     this.registerIpc()
     this.startArchiver()
     setTimeout(() => this.archiveIdle(false), 5000)
-    app.on('before-quit', () => this.store.flush(this.state))
+    app.on('before-quit', () => { this.flushStateSafely() })
   }
 
 
@@ -290,6 +303,45 @@ class OpenArcApp {
     } else {
       this.win.loadFile(join(__dirname, '../renderer/index.html'))
     }
+    // Shell renderer crash: reload once (state lives in main, so the UI
+    // rebuilds from state:get); a repeat inside 30s is left for the user.
+    const shellGate = new CrashGate()
+    this.win.webContents.on('render-process-gone', (_e, details) => {
+      if (!isCrashReason(details.reason) || this.win.isDestroyed()) return
+      console.log(`[openarc] shell renderer gone: ${details.reason}`)
+      if (shellGate.shouldAutoRecover('shell')) {
+        this.win.webContents.reload()
+        return
+      }
+      // Second crash inside the gate window: no more auto-reload. Ask the user.
+      // Saved state is flushed first (the 300ms debounce could otherwise drop
+      // the latest change); in-flight page state is not durable and is lost.
+      if (this.crashDialogOpen) return
+      this.crashDialogOpen = true
+      const saved = this.flushStateSafely()
+      void dialog
+        .showMessageBox(this.win, {
+          type: 'error',
+          message: 'Open Arc\u2019s window crashed twice in a row.',
+          detail: (this.lastCrashDialogDetail = saved
+            ? 'Your spaces and tabs were saved. Reload to try again, or quit and reopen Open Arc.'
+            : 'Open Arc could not save your latest changes (the disk write failed). The last saved copy is kept, but recent changes may be lost. Reload to try again, or quit and reopen Open Arc.'),
+          buttons: ['Reload', 'Quit'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true
+        })
+        .then((r) => {
+          this.crashDialogOpen = false
+          if (r.response === 0 && !this.win.isDestroyed()) {
+            shellGate.forget('shell')
+            this.win.webContents.reload()
+          } else {
+            app.quit()
+          }
+        })
+        .catch(() => { this.crashDialogOpen = false })
+    })
     this.win.webContents.on('did-finish-load', () => {
       console.log('[openarc] renderer finished load')
       this.commit()
@@ -2238,57 +2290,87 @@ class OpenArcApp {
     return result
   }
 
+  private trust(): TrustConfig {
+    return {
+      shellWebContentsId: this.win.webContents.id,
+      devUrl: isDev ? process.env.ELECTRON_RENDERER_URL : undefined,
+      packagedIndexPath: isDev ? undefined : join(__dirname, '../renderer/index.html')
+    }
+  }
+
   private registerIpc(): void {
-    ipcMain.handle('state:get', () => this.state)
-    ipcMain.handle('commands:list', () => COMMANDS)
-    ipcMain.on('state:recovery-choice', (_e, accept: boolean) => this.applyRecoveryChoice(accept === true))
-    ipcMain.on('state:recovery-malformed-choice', (_e, keep: boolean) => { this.store.dismissMalformed(keep === true) })
+    // Every channel goes through these two wrappers: a rejected caller gets
+    // no state and triggers no effect (invoke -> null, send -> dropped).
+    const handle = (channel: string, fn: (...a: any[]) => unknown): void => {
+      ipcMain.handle(channel, (e, ...args) => (isTrustedSender(e, this.trust()) ? fn(...args) : null))
+    }
+    const on = (channel: string, fn: (...a: any[]) => void): void => {
+      ipcMain.on(channel, (e, ...args) => {
+        if (isTrustedSender(e, this.trust())) fn(...args)
+      })
+    }
 
-    ipcMain.on('space:switch', (_e, spaceId: string) => {
-      if (this.state.spaces.some((s) => s.id === spaceId)) {
-        this.state.activeSpaceId = spaceId
+    handle('state:get', () => this.state)
+    handle('commands:list', () => COMMANDS)
+    on('state:recovery-choice', (accept: unknown) => this.applyRecoveryChoice(accept === true))
+    on('state:recovery-malformed-choice', (keep: unknown) => { this.store.dismissMalformed(keep === true) })
+
+    on('space:switch', (spaceId: unknown) => {
+      const sid = idv(spaceId)
+      if (sid && this.state.spaces.some((s) => s.id === sid)) {
+        this.state.activeSpaceId = sid
         this.commit()
       }
     })
-    ipcMain.on('space:create', (_e, name: string) => this.createSpace(name))
-    ipcMain.on('space:rename', (_e, spaceId: string, name: string) => {
-      const s = this.state.spaces.find((sp) => sp.id === spaceId)
-      if (s && name.trim()) {
-        s.name = name.trim()
-        s.icon = name.trim().charAt(0).toUpperCase()
+    on('space:create', (name: unknown) => {
+      const n = str(name, 100)
+      if (n !== null) this.createSpace(n)
+    })
+    on('space:rename', (spaceId: unknown, name: unknown) => {
+      const sid = idv(spaceId)
+      const n = str(name, 100)
+      const s = sid ? this.state.spaces.find((sp) => sp.id === sid) : undefined
+      if (s && n && n.trim()) {
+        s.name = n.trim()
+        s.icon = n.trim().charAt(0).toUpperCase()
         this.commit()
       }
     })
 
-    ipcMain.on('tab:open', (_e, url: string) => this.openTab(url))
-    ipcMain.on('tab:close', (_e, tabId: string) => this.closeTab(tabId))
-    ipcMain.on('tab:switch', (_e, tabId: string) => this.switchTab(tabId))
-    ipcMain.on('tab:split-with', (_e, tabId: string) => this.splitTabWith(tabId))
-    ipcMain.on('tab:pin', (_e, tabId: string) => this.setPinned(tabId, true))
-    ipcMain.on('tab:unpin', (_e, tabId: string) => this.setPinned(tabId, false))
-    ipcMain.on('tab:favorite', (_e, tabId: string) => this.toggleFavorite(tabId))
-    ipcMain.on('tab:restore', (_e, tabId: string) => this.restoreTab(tabId))
-    ipcMain.handle('find:in-page', (_e, text: string, findNext: boolean) => {
+    on('tab:open', (url: unknown) => {
+      const u = userUrl(url)
+      if (u !== null) this.openTab(u)
+    })
+    on('tab:close', (t: unknown) => { const v = idv(t); if (v) this.closeTab(v) })
+    on('tab:switch', (t: unknown) => { const v = idv(t); if (v) this.switchTab(v) })
+    on('tab:split-with', (t: unknown) => { const v = idv(t); if (v) this.splitTabWith(v) })
+    on('tab:pin', (t: unknown) => { const v = idv(t); if (v) this.setPinned(v, true) })
+    on('tab:unpin', (t: unknown) => { const v = idv(t); if (v) this.setPinned(v, false) })
+    on('tab:favorite', (t: unknown) => { const v = idv(t); if (v) this.toggleFavorite(v) })
+    on('tab:restore', (t: unknown) => { const v = idv(t); if (v) this.restoreTab(v) })
+    handle('find:in-page', (text: unknown, findNext: unknown) => {
+      const t = str(text, 500)
       const target = this.focusedTab()
-      return target ? this.tabs.findIn(target.id, text, !!findNext) : null
+      return target && t !== null ? this.tabs.findIn(target.id, t, !!findNext) : null
     })
-    ipcMain.on('find:stop', () => {
+    on('find:stop', () => {
       const target = this.focusedTab()
       if (target) this.tabs.stopFind(target.id)
     })
-    ipcMain.handle('tab:zoom', (_e, action: 'in' | 'out' | 'reset') => {
+    handle('tab:zoom', (action: unknown) => {
+      const a = oneOf(action, ['in', 'out', 'reset'] as const)
       const target = this.focusedTab()
-      if (!target) return 1
-      const factor = this.tabs.adjustZoom(target.id, action)
+      if (!target || !a) return 1
+      const factor = this.tabs.adjustZoom(target.id, a)
       target.zoom = factor // persisted; restored when the view is (re)created
       this.store.save(this.state)
       return factor
     })
-    ipcMain.handle('tab:mute-toggle', () => {
+    handle('tab:mute-toggle', () => {
       const target = this.focusedTab()
       return target ? this.tabs.toggleMute(target.id) : false
     })
-    ipcMain.handle('tab:print-pdf', async () => {
+    handle('tab:print-pdf', async () => {
       const target = this.focusedTab()
       const wc = target ? this.tabs.webContentsFor(target.id) : null
       if (!wc) return null
@@ -2305,7 +2387,7 @@ class OpenArcApp {
         return null
       }
     })
-    ipcMain.handle('tab:reader', async () => {
+    handle('tab:reader', async () => {
       const target = this.focusedTab()
       const wc = target ? this.tabs.webContentsFor(target.id) : null
       if (!wc) return 'no-content'
@@ -2315,38 +2397,47 @@ class OpenArcApp {
         return 'no-content'
       }
     })
-    ipcMain.handle('tab:devtools', () => {
+    handle('tab:devtools', () => {
       const target = this.focusedTab()
       return target ? this.tabs.toggleDevTools(target.id) : false
     })
-    ipcMain.handle('tab:copy-url', () => {
+    handle('tab:copy-url', () => {
       const target = this.focusedTab()
       if (!target) return null
       const url = this.tabs.currentUrl(target.id)
       if (url) clipboard.writeText(url)
       return url
     })
-    ipcMain.on('nav', (_e, cmd: 'back' | 'forward' | 'reload') => {
+    on('nav', (cmd: unknown) => {
+      const c = oneOf(cmd, ['back', 'forward', 'reload'] as const)
       const target = this.focusedTab()
-      if (target) this.tabs.navigate(target.id, cmd)
+      if (target && c) this.tabs.navigate(target.id, c)
     })
-    ipcMain.on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
-    ipcMain.on('window:control', (_e, action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => this.windowControl(action))
-    ipcMain.on('app:overlay', (_e, modal: boolean, findBar: boolean, toast: boolean) => {
+    on('sidebar:toggle', () => this.runCommand('toggle-sidebar'))
+    on('window:control', (action: unknown) => {
+      const a = oneOf(action, ['minimize', 'maximize', 'fullscreen', 'close'] as const)
+      if (a) this.windowControl(a)
+    })
+    on('app:overlay', (modal: unknown, findBar: unknown, toast: unknown) => {
       if (!this.win.isDestroyed()) this.tabs.setOverlayState(!!modal, !!findBar, !!toast)
     })
-    ipcMain.on('app:focus', (_e, which: 'shell' | 'page') => {
+    on('app:focus', (which: unknown) => {
       if (this.win.isDestroyed()) return
-      if (which === 'shell') this.win.webContents.focus()
-      else {
+      const w = oneOf(which, ['shell', 'page'] as const)
+      if (w === 'shell') this.win.webContents.focus()
+      else if (w === 'page') {
         const t = this.focusedTab()
         if (t) this.tabs.focusTab(t.id)
       }
     })
-    ipcMain.on('command:run', (_e, id: string, arg?: string) => this.runCommand(id, arg))
+    on('command:run', (cid: unknown, arg: unknown) => {
+      const c = commandId(cid)
+      const a = arg === undefined || arg === null ? undefined : str(arg)
+      if (c && a !== null) this.runCommand(c, a)
+    })
 
     // Split view drag and ratio management
-    ipcMain.on('split:drag-start', () => {
+    on('split:drag-start', () => {
       const space = this.activeSpace()
       const initialRatio = space.splitRatio ?? 0.5
       const [w] = this.win.getContentSize()
@@ -2376,14 +2467,17 @@ class OpenArcApp {
       )
     })
 
-    ipcMain.on('split:preview-ratio', (_e, ratio: number) => {
-      this.tabs.setSplitRatio(ratio)
+    on('split:preview-ratio', (ratio: unknown) => {
+      if (typeof ratio === 'number' && Number.isFinite(ratio)) {
+        this.tabs.setSplitRatio(ratio)
+      }
     })
 
-    ipcMain.on('split:commit-ratio', (_e, ratio: number) => {
+    on('split:commit-ratio', (ratio: unknown) => {
       this.tabs.stopSplitDrag()
       const space = this.activeSpace()
-      const sanitized = Number.isFinite(ratio) ? Math.max(0.1, Math.min(0.9, Math.round(ratio * 1000) / 1000)) : 0.5
+      const r = typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : 0.5
+      const sanitized = Math.max(0.1, Math.min(0.9, Math.round(r * 1000) / 1000))
       space.splitRatio = sanitized
       this.tabs.setSplitRatio(sanitized)
       this.commit()
@@ -2391,7 +2485,7 @@ class OpenArcApp {
       if (focused) this.tabs.focusTab(focused.id)
     })
 
-    ipcMain.on('split:cancel-ratio', () => {
+    on('split:cancel-ratio', () => {
       this.tabs.stopSplitDrag()
       const space = this.activeSpace()
       const ratio = space.splitRatio ?? 0.5
@@ -2400,7 +2494,7 @@ class OpenArcApp {
       if (focused) this.tabs.focusTab(focused.id)
     })
 
-    ipcMain.on('split:reset-ratio', () => {
+    on('split:reset-ratio', () => {
       this.tabs.stopSplitDrag()
       const space = this.activeSpace()
       space.splitRatio = 0.5
