@@ -506,6 +506,7 @@ class OpenArcApp {
    * that a previous run's state survived the restart (persistence check).
    * No effect in normal use.
    */
+  private shellCrashRan = false
   private async selfTest(): Promise<void> {
     const dir = process.env.OPEN_ARC_SHOT_DIR
     if (!dir) return
@@ -528,6 +529,33 @@ class OpenArcApp {
         await wait(250)
       }
       return fn()
+    }
+
+    if (process.env.OPEN_ARC_PHASE === 'shellcrash') {
+      // One-shot guard: the reload after a crash fires did-finish-load again,
+      // which would re-enter selfTest. Run this scenario exactly once.
+      if (this.shellCrashRan) return
+      this.shellCrashRan = true
+      let loads = 0
+      this.win.webContents.on('did-finish-load', () => loads++)
+      const spacesBefore = this.state.spaces.length
+      const probeState = async (): Promise<number> => {
+        const st = await this.win.webContents.executeJavaScript('window.openArc.getState()')
+        return Array.isArray(st?.spaces) ? st.spaces.length : -1
+      }
+      check('shell crash: baseline renderer responds', (await probeState()) === spacesBefore)
+      this.win.webContents.forcefullyCrashRenderer()
+      const reloaded = await pollUntil(() => loads >= 1 && !this.win.webContents.isCrashed(), 12000)
+      check('shell crash: first crash auto-reloads the shell', reloaded, `loads=${loads}`)
+      let after = -2
+      try { after = await probeState() } catch { /* reported below */ }
+      check('shell crash: renderer responds and state is intact after reload', after === spacesBefore && this.state.spaces.length === spacesBefore, `spaces ${spacesBefore}->${after}`)
+      this.win.webContents.forcefullyCrashRenderer()
+      await wait(4000)
+      check('shell crash: immediate repeat crash is NOT auto-reloaded (no loop)', loads === 1 && this.win.webContents.isCrashed(), `loads=${loads} crashed=${this.win.webContents.isCrashed()}`)
+      writeFileSync(`${dir}/report-shellcrash.json`, JSON.stringify({ phase: 'shellcrash', checks }, null, 2))
+      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      return
     }
 
     if (process.env.OPEN_ARC_PHASE === 'verify') {

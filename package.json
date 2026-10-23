@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "shot": "node scripts/screenshot.mjs",
     "test:security": "node scripts/security.test.mjs",
-    "test:recovery": "node scripts/recovery.test.mjs"
+    "test:recovery": "node scripts/recovery.test.mjs",
+    "test:shellcrash": "node scripts/shell-crash.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
