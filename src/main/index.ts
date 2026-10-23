@@ -8,6 +8,7 @@ import type { AppState, Space, TabItem } from '../shared/types'
 import { COMMANDS } from '../shared/commands'
 import { StateStore } from './store'
 import { TabLayer } from './tabs'
+import { CrashGate, isCrashReason } from './recovery'
 import { isTrustedSender, installPermissionPolicy, str, id as idv, oneOf, commandId, userUrl, type TrustConfig } from './security'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -193,6 +194,14 @@ class OpenArcApp {
     } else {
       this.win.loadFile(join(__dirname, '../renderer/index.html'))
     }
+    // Shell renderer crash: reload once (state lives in main, so the UI
+    // rebuilds from state:get); a repeat inside 30s is left for the user.
+    const shellGate = new CrashGate()
+    this.win.webContents.on('render-process-gone', (_e, details) => {
+      if (!isCrashReason(details.reason) || this.win.isDestroyed()) return
+      console.log(`[openarc] shell renderer gone: ${details.reason}`)
+      if (shellGate.shouldAutoRecover('shell')) this.win.webContents.reload()
+    })
     this.win.webContents.on('did-finish-load', () => {
       console.log('[openarc] renderer finished load')
       this.commit()
@@ -1272,6 +1281,52 @@ class OpenArcApp {
         `tabs ${tabsBefore}->${tabsAfter} spaces ${spacesBefore}->${this.state.spaces.length}`
       )
       check('native IPC: legitimate shell caller still gets state', !!shellState && Array.isArray(shellState.spaces))
+    }
+
+    // Native tab-crash recovery: kill the real renderer process twice.
+    // 1st crash -> automatic reload restores the page; 2nd within the gate
+    // window -> inert "This page crashed" page, Ctrl+R-equivalent restores it.
+    {
+      const { createServer: mk } = await import('node:http')
+      const crashSrv = mk((_q, res) => {
+        res.setHeader('content-type', 'text/html')
+        res.end('<!doctype html><title>crash-target</title><h1>alive</h1>')
+      })
+      await new Promise<void>((r) => crashSrv.listen(0, '127.0.0.1', r))
+      const crashUrl = `http://127.0.0.1:${(crashSrv.address() as { port: number }).port}/`
+      this.openTab(crashUrl)
+      const ct = this.activeTab() as TabItem
+      const wcOf = (): Electron.WebContents | null => this.tabs.webContentsFor(ct.id)
+      const titleIs = (t: string) => async (): Promise<boolean> => wcOf()?.getTitle() === t
+      await pollUntil(titleIs('crash-target'), 8000)
+      check('crash: target tab loaded before crash', wcOf()?.getTitle() === 'crash-target')
+      wcOf()?.forcefullyCrashRenderer()
+      const recovered = await pollUntil(async () => this.tabs.crashEvents.some((e) => e.includes(':reload:')) && wcOf()?.getTitle() === 'crash-target', 10000)
+      check('crash: first crash auto-reloads the real page', recovered, this.tabs.crashEvents.join(','))
+      wcOf()?.forcefullyCrashRenderer()
+      const shown = await pollUntil(async () => this.tabs.crashEvents.some((e) => e.includes(':page:')) && wcOf()?.getTitle() === 'This page crashed', 10000)
+      check('crash: repeat crash shows crashed page (no loop)', shown, this.tabs.crashEvents.join(','))
+      this.tabs.navigate(ct.id, 'reload')
+      const back = await pollUntil(titleIs('crash-target'), 10000)
+      check('crash: reload from crashed page restores the original URL', back)
+      check('crash: app state intact after crashes', this.state.spaces.length >= 1 && !!this.activeTab())
+      this.closeTab(ct.id)
+      crashSrv.close()
+    }
+
+    // Corrupt state on disk is quarantined, not silently overwritten.
+    {
+      const sdir = join(app.getPath('userData'), 'open-arc')
+      const sfile = join(sdir, 'state.json')
+      const before = fs.readdirSync(sdir).filter((f) => f.includes('.corrupt-')).length
+      const keep = fs.readFileSync(sfile, 'utf8')
+      fs.writeFileSync(sfile, '{"spaces": [ truncated')
+      const loaded = new StateStore().load()
+      const files = fs.readdirSync(sdir).filter((f) => f.includes('.corrupt-'))
+      const saved = files.length > before && fs.readFileSync(join(sdir, files[files.length - 1]), 'utf8').includes('truncated')
+      fs.writeFileSync(sfile, keep)
+      for (const f of files) fs.unlinkSync(join(sdir, f))
+      check('store: malformed state.json returns null AND is preserved aside', loaded === null && saved)
     }
 
     // Window bounds persistence: set a distinctive size; the verify phase
