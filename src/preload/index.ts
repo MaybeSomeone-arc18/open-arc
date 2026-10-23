@@ -23,6 +23,11 @@ const api: OpenArcApi = {
     ipcRenderer.on('state:recovered', listener)
     return () => ipcRenderer.removeListener('state:recovered', listener)
   },
+  onSaveFailed: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, error: string): void => cb(error)
+    ipcRenderer.on('state:save-failed', listener)
+    return () => ipcRenderer.removeListener('state:save-failed', listener)
+  },
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),

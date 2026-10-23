@@ -12,6 +12,10 @@ export class StateStore {
   private timer: NodeJS.Timeout | null = null
   /** Set when load() found an unreadable state file and moved it aside. */
   quarantinedTo: string | null = null
+  /** Last save failure; null when the most recent flush succeeded. */
+  lastSaveError: string | null = null
+  /** Called when a debounced save fails (assigned by the app shell). */
+  onSaveError: ((err: string) => void) | null = null
 
   constructor() {
     const dir = join(app.getPath('userData'), 'open-arc')
@@ -36,6 +40,9 @@ export class StateStore {
         console.warn(`[openarc] saved state unreadable (${String(err)}); original moved to ${backup}; starting fresh`)
       } catch (moveErr) {
         console.warn(`[openarc] saved state unreadable (${String(err)}); could not move it aside (${String(moveErr)}); starting fresh without touching it`)
+        // Redirect future saves to a fresh file so they never replace the
+        // unreadable original.
+        this.file = `${this.file}.fresh-${new Date().toISOString().replace(/[:.]/g, '-')}`
       }
       return null
     }
@@ -48,8 +55,22 @@ export class StateStore {
   }
 
   flush(state: AppState): void {
-    const tmp = this.file + '.tmp'
-    writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8')
-    renameSync(tmp, this.file)
+    try {
+      const tmp = this.file + '.tmp'
+      writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8')
+      renameSync(tmp, this.file)
+      this.lastSaveError = null
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.lastSaveError = message
+      console.warn(`[openarc] state save failed: ${message}`)
+      if (this.onSaveError) {
+        try {
+          this.onSaveError(message)
+        } catch {
+          /* listener errors must not escape the timer */
+        }
+      }
+    }
   }
 }

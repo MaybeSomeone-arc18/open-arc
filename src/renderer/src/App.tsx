@@ -42,6 +42,11 @@ export function App(): JSX.Element {
       if (toastTimer) clearTimeout(toastTimer)
       toastTimer = setTimeout(() => setDownloadToast(null), 8000)
     })
+    const offSaveFailed = window.openArc.onSaveFailed(() => {
+      setDownloadToast("Couldn't save latest changes - will retry on the next change")
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => setDownloadToast(null), 8000)
+    })
     const offLoading = window.openArc.onTabLoading((tabId, loading) => {
       setLoadingTabs((prev) => {
         const next = new Set(prev)
@@ -135,6 +140,7 @@ export function App(): JSX.Element {
       offLoading()
       offDownload()
       offRecovered()
+      offSaveFailed()
       offShortcut()
       if (toastTimer) clearTimeout(toastTimer)
       window.removeEventListener('keydown', onKey)

@@ -74,6 +74,7 @@ export interface OpenArcApi {
   /** Transient: a download finished (state: completed | cancelled | interrupted). */
   onDownloadDone(cb: (info: { filename: string; path: string; state: string; size?: number }) => void): () => void
   onStateRecovered(cb: (quarantinedPath: string) => void): () => void
+  onSaveFailed(cb: (error: string) => void): () => void
 
   switchSpace(spaceId: string): void
   createSpace(name: string): void

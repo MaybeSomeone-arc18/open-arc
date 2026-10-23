@@ -18,7 +18,7 @@
  * access (the suite loads example.com, example.org and wikipedia.org for real).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,14 +35,15 @@ if (!existsSync(join(root, 'out/main/index.js'))) {
   process.exit(1)
 }
 
-function launch(phase) {
+function launch(phase, extraEnv = {}) {
   return new Promise((resolve) => {
     const env = {
       ...process.env,
       OPEN_ARC_SHOT_DIR: outDir,
       OPEN_ARC_PHASE: phase,
       OPEN_ARC_USER_DATA: profile,
-      OPEN_ARC_NO_SANDBOX: '1'
+      OPEN_ARC_NO_SANDBOX: '1',
+      ...extraEnv
     }
     // Software-compositing flags must ride the real command line; some
     // Chromium switches are unreliable via appendSwitch in every environment.
@@ -66,8 +67,14 @@ function launch(phase) {
     // macOS/Windows launch Electron directly: they always have a window server.
     console.log(`[smoke] launching phase=${phase}`)
     const p = spawn(cmd, args, { cwd: root, env, stdio: ['ignore', 'inherit', 'inherit'] })
-    p.on('error', (e) => { console.error(`[smoke] launch failed: ${e.message}`); resolve(1) })
-    p.on('exit', (code) => resolve(code ?? 1))
+    // A phase must never hang the suite: kill it past the watchdog.
+    const watchdog = setTimeout(() => {
+      console.error(`[smoke] phase=${phase} exceeded 150s watchdog - killing (recorded as exit 124)`)
+      p.kill('SIGKILL')
+      resolve(124)
+    }, 150000)
+    p.on('error', (e) => { console.error(`[smoke] launch failed: ${e.message}`); clearTimeout(watchdog); resolve(1) })
+    p.on('exit', (code) => { clearTimeout(watchdog); resolve(code ?? 1) })
   })
 }
 
@@ -95,6 +102,12 @@ writeFileSync(stateFile, JSON.stringify({
   sidebarVisible: true
 }))
 const partialCode = corruptCode === 0 ? await launch('partial') : 1
+const savefailCode = partialCode === 0 ? await launch('savefail') : 1
+// quaranfail: the quarantine rename itself fails (read-only dir at boot).
+writeFileSync(stateFile, garbage)
+chmodSync(stateDir, 0o555)
+const quaranCode = savefailCode === 0 ? await launch('quaranfail', { OPEN_ARC_PLANTED_GARBAGE: garbage }) : 1
+chmodSync(stateDir, 0o755) // restore so the profile can be cleaned up
 // The unreadable original must survive as a quarantined copy, byte-for-byte.
 let preserved = false
 let preserveDetail = 'no quarantine file'
@@ -106,8 +119,8 @@ try {
 console.log((preserved ? 'PASS' : 'FAIL') + '  recovery: quarantined original bytes preserved  (' + preserveDetail + ')')
 rmSync(profile, { recursive: true, force: true })
 
-let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || !preserved
-for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json']) {
+let failed = runCode !== 0 || verifyCode !== 0 || corruptCode !== 0 || partialCode !== 0 || savefailCode !== 0 || quaranCode !== 0 || !preserved
+for (const file of ['report-run.json', 'report-verify.json', 'report-corrupt.json', 'report-partial.json', 'report-savefail.json', 'report-quaranfail.json']) {
   const r = report(file)
   if (!r) { console.error(`[smoke] missing ${file}`); failed = true; continue }
   for (const c of r.checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)

@@ -194,6 +194,10 @@ class OpenArcApp {
       callback(false)
     })
 
+    // A failed debounced save must become an explicit signal, not silence.
+    this.store.onSaveError = (saveErr) => {
+      if (!this.win.isDestroyed()) this.win.webContents.send('state:save-failed', saveErr)
+    }
     this.registerIpc()
     this.startArchiver()
     setTimeout(() => this.archiveIdle(false), 5000)
@@ -798,7 +802,11 @@ class OpenArcApp {
 
     if (process.env.OPEN_ARC_PHASE === 'corrupt' || process.env.OPEN_ARC_PHASE === 'partial') {
       // State-recovery phases: the runner planted the state file BEFORE launch.
-      await wait(1500)
+      // Open a page immediately so the recovery notice can be captured
+      // composited ABOVE painted page content before it auto-dismisses.
+      this.openTab('https://example.com/')
+      const noticeTab = this.activeTab()!
+      await wait(1200)
       if (process.env.OPEN_ARC_PHASE === 'corrupt') {
         check('recovery: unreadable state quarantined, not overwritten', this.store.quarantinedTo !== null, `quarantinedTo=${this.store.quarantinedTo}`)
         check('recovery: app boots to a usable default state', this.state.spaces.length >= 1, `${this.state.spaces.length} spaces`)
@@ -806,6 +814,15 @@ class OpenArcApp {
           try { return await this.win.webContents.executeJavaScript("!!document.querySelector('.download-toast')") } catch { return false }
         }, 6000)
         check('recovery: user notified of the quarantine', noticeShown)
+        const noticePainted = await pollUntil(() => noticeTab.title === 'Example Domain', 12000)
+        const noticeStillUp = await this.win.webContents.executeJavaScript("!!document.querySelector('.download-toast')").catch(() => false)
+        if (noticePainted && noticeStillUp) {
+          try {
+            const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 840 } })
+            if (srcs.length && !srcs[0].thumbnail.isEmpty()) writeFileSync(`${dir}/recovery-notice.png`, srcs[0].thumbnail.toPNG())
+          } catch { /* capture best-effort */ }
+        }
+        check('recovery: notice captured above painted page', noticePainted && noticeStillUp, `painted=${noticePainted} toastUp=${noticeStillUp}`)
       } else {
         check('recovery: readable older state NOT quarantined', this.store.quarantinedTo === null, `quarantinedTo=${this.store.quarantinedTo}`)
         check('recovery: recoverable spaces preserved', this.state.spaces.some((sp) => sp.name === 'Recovered Space'), `spaces=${this.state.spaces.map((sp) => sp.name).join(',')}`)
@@ -814,6 +831,61 @@ class OpenArcApp {
       const rcTab = this.activeTab()!
       const rcLoaded = await pollUntil(() => rcTab.title === 'Example Domain', 15000)
       check('recovery: app functional after recovery', rcLoaded, `title="${rcTab.title}"`)
+      writeFileSync(`${dir}/report-${process.env.OPEN_ARC_PHASE}.json`, JSON.stringify({ phase: process.env.OPEN_ARC_PHASE, checks }, null, 2))
+      app.exit(checks.every((c) => c.pass) ? 0 : 1)
+      return
+    }
+
+    if (process.env.OPEN_ARC_PHASE === 'savefail' || process.env.OPEN_ARC_PHASE === 'quaranfail') {
+      // Delayed-save failure path: REAL chmod-induced write failures against
+      // the running app. Bounded externally by the runner watchdog.
+      await wait(1200)
+      const stateDir = join(app.getPath('userData'), 'open-arc')
+      const { chmodSync, readdirSync: rdSync, readFileSync: rfSync } = await import('node:fs')
+      const probeResponsive = async (): Promise<boolean> => {
+        try { return (await this.win.webContents.executeJavaScript('1 + 1')) === 2 } catch { return false }
+      }
+      if (process.env.OPEN_ARC_PHASE === 'savefail') {
+        this.openTab('https://example.com/')
+        const sfTab = this.activeTab()!
+        await pollUntil(() => sfTab.title === 'Example Domain', 15000)
+        check('savefail: baseline save lands on disk', await pollUntil(() => fs.existsSync(join(stateDir, 'state.json')), 5000))
+        chmodSync(stateDir, 0o555)
+        this.createSpace('Savefail Probe') // state change -> debounced save must fail
+        await wait(1200)
+        // Diagnostic capture while the failure is live: an uncaught main
+        // throw would surface as an Electron error dialog in this frame.
+        try {
+          const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 840 } })
+          if (srcs.length && !srcs[0].thumbnail.isEmpty()) writeFileSync(`${dir}/savefail-during.png`, srcs[0].thumbnail.toPNG())
+        } catch { /* capture is diagnostic only */ }
+        check('savefail: write failure recorded, never reported as success', this.store.lastSaveError !== null, `lastSaveError=${this.store.lastSaveError}`)
+        check('savefail: app stays responsive during the failure', await probeResponsive())
+        check('savefail: existing tabs keep working during the failure', await pollUntil(() => sfTab.title === 'Example Domain', 3000))
+        chmodSync(stateDir, 0o755) // recovery: writes possible again
+        this.createSpace('Savefail Recovery')
+        const recovered = await pollUntil(() => {
+          try { return rfSync(join(stateDir, 'state.json'), 'utf8').includes('Savefail Recovery') } catch { return false }
+        }, 6000)
+        check('savefail: save succeeds after permissions recover', recovered)
+        check('savefail: error status clears after a successful save', this.store.lastSaveError === null, `lastSaveError=${this.store.lastSaveError}`)
+      } else {
+        // quaranfail: the runner planted garbage state.json AND made the
+        // state dir read-only BEFORE launch, so the quarantine rename failed.
+        check('quaranfail: unreadable state could not be quarantined (rename failed)', this.store.quarantinedTo === null)
+        this.createSpace('Quaranfail Probe')
+        await wait(1200)
+        check('quaranfail: failed save recorded', this.store.lastSaveError !== null, `lastSaveError=${this.store.lastSaveError}`)
+        check('quaranfail: app responsive during failure', await probeResponsive())
+        chmodSync(stateDir, 0o755)
+        this.createSpace('Quaranfail Recovery')
+        const fallbackUsed = await pollUntil(() => rdSync(stateDir).some((f) => f.startsWith('state.json.fresh-')), 6000)
+        check('quaranfail: recovered save lands in a fallback file, not over the original', fallbackUsed, rdSync(stateDir).join(','))
+        let orig = ''
+        try { orig = rfSync(join(stateDir, 'state.json'), 'utf8') } catch { /* missing */ }
+        check('quaranfail: unreadable original preserved byte-for-byte', orig === process.env.OPEN_ARC_PLANTED_GARBAGE)
+        check('quaranfail: error clears after recovery save', await pollUntil(() => this.store.lastSaveError === null, 4000))
+      }
       writeFileSync(`${dir}/report-${process.env.OPEN_ARC_PHASE}.json`, JSON.stringify({ phase: process.env.OPEN_ARC_PHASE, checks }, null, 2))
       app.exit(checks.every((c) => c.pass) ? 0 : 1)
       return
