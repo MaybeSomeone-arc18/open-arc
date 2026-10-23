@@ -756,8 +756,12 @@ class OpenArcApp {
     app.exit(code)
     setTimeout(() => {
       const forced = code === 0 ? 97 : code
-      console.error(`[openarc] app.exit(${code}) did not terminate the process within 5s; forcing process.exit(${forced}) - teardown hang: this run FAILED`)
-      process.exit(forced)
+      console.error(`[openarc] app.exit(${code}) did not terminate the process within 5s; forcing exit(${forced}) - teardown hang: this run FAILED`)
+      // Electron wraps process.exit as app.exit, which is the path that is
+      // hanging; bypass it with Node's raw reallyExit, else hard-kill.
+      const raw = (process as unknown as { reallyExit?: (c: number) => never }).reallyExit
+      if (raw) raw.call(process, forced)
+      else process.kill(process.pid, 'SIGKILL')
     }, 5000).unref()
   }
 
