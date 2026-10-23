@@ -123,3 +123,73 @@ body { background: var(--bg); color: var(--text); font-size: 13px; }
 .command-row.selected { background: color-mix(in srgb, var(--space-color) 26%, transparent); color: var(--text); }
 .command-row.empty { justify-content: center; font-style: italic; }
 .command-hint { font-size: 11px; color: var(--text-dim); }
+
+/* ---- Shortcuts overlay ---- */
+.shortcuts-panel { width: 480px; }
+.shortcuts-title {
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+  padding: 14px 18px 10px; border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.shortcuts-row { cursor: default; }
+.shortcuts-row:hover { background: color-mix(in srgb, var(--space-color) 18%, transparent); color: var(--text); }
+
+.empty-hint.clickable { cursor: pointer; }
+.empty-hint.clickable:hover { color: var(--text); }
+
+@keyframes oa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.favicon.loading { display: inline-block; animation: oa-spin 1s linear infinite; color: var(--space-color); }
+
+.download-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  background: color-mix(in srgb, var(--space-color) 30%, #1d1c24);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--space-color) 60%, transparent);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.ghost-btn.danger { color: #d0607e; }
+.space-dot-input {
+  background: var(--bg-hover);
+  border: 1px solid var(--space-color);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 84px;
+  outline: none;
+}
+
+.find-bar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #23222b;
+  border: 1px solid color-mix(in srgb, var(--space-color) 55%, transparent);
+  border-radius: 9px;
+  padding: 6px 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.find-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  width: 180px;
+}
+.find-count { font-size: 12px; opacity: 0.7; min-width: 34px; text-align: right; }
+
+/* Slim dark scrollbars for overlay lists */
+.command-rows::-webkit-scrollbar { width: 8px; }
+.command-rows::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
+.command-rows::-webkit-scrollbar-track { background: transparent; }

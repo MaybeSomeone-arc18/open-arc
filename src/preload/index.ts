@@ -8,6 +8,26 @@ const api: OpenArcApi = {
     ipcRenderer.on('state:changed', listener)
     return () => ipcRenderer.removeListener('state:changed', listener)
   },
+  onTabLoading: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, tabId: string, loading: boolean): void => cb(tabId, loading)
+    ipcRenderer.on('tab:loading', listener)
+    return () => ipcRenderer.removeListener('tab:loading', listener)
+  },
+  onDownloadDone: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, info: { filename: string; path: string; state: string; size?: number }): void => cb(info)
+    ipcRenderer.on('download:done', listener)
+    return () => ipcRenderer.removeListener('download:done', listener)
+  },
+  onStateRecovered: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, quarantinedPath: string): void => cb(quarantinedPath)
+    ipcRenderer.on('state:recovered', listener)
+    return () => ipcRenderer.removeListener('state:recovered', listener)
+  },
+  onSaveFailed: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, error: string): void => cb(error)
+    ipcRenderer.on('state:save-failed', listener)
+    return () => ipcRenderer.removeListener('state:save-failed', listener)
+  },
 
   switchSpace: (id) => ipcRenderer.send('space:switch', id),
   createSpace: (name) => ipcRenderer.send('space:create', name),
@@ -21,8 +41,24 @@ const api: OpenArcApi = {
   restoreTab: (id) => ipcRenderer.send('tab:restore', id),
 
   navigate: (cmd) => ipcRenderer.send('nav', cmd),
+  findInPage: (text, findNext) => ipcRenderer.invoke('find:in-page', text, !!findNext),
+  stopFind: () => ipcRenderer.send('find:stop'),
+  zoom: (action) => ipcRenderer.invoke('tab:zoom', action),
+  copyActiveUrl: () => ipcRenderer.invoke('tab:copy-url'),
+  toggleMute: () => ipcRenderer.invoke('tab:mute-toggle'),
+  toggleDevTools: () => ipcRenderer.invoke('tab:devtools'),
+  toggleReader: () => ipcRenderer.invoke('tab:reader'),
+  printToPdf: () => ipcRenderer.invoke('tab:print-pdf'),
   toggleSidebar: () => ipcRenderer.send('sidebar:toggle'),
   windowControl: (action) => ipcRenderer.send('window:control', action),
+  focusShell: () => ipcRenderer.send('app:focus', 'shell'),
+  focusPage: () => ipcRenderer.send('app:focus', 'page'),
+  setOverlayState: (modal, findBar, toast) => ipcRenderer.send('app:overlay', modal, findBar, toast),
+  onShortcut: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, action: Parameters<typeof cb>[0], arg?: string): void => cb(action, arg)
+    ipcRenderer.on('app:shortcut', listener)
+    return () => ipcRenderer.removeListener('app:shortcut', listener)
+  },
 
   runCommand: (id, arg) => ipcRenderer.send('command:run', id, arg),
   listCommands: () => ipcRenderer.invoke('commands:list') as Promise<CommandDef[]>

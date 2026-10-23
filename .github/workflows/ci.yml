@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    # Full verification: clean install, typecheck, production build and the
+    # 62-check smoke suite (run + persistence-verify phases) under Xvfb.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install display + Electron runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run shot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-shots
+          path: shots/
+          retention-days: 14
+
+  build:
+    # Platform compatibility: the app must clean-install, typecheck and build
+    # on every desktop platform. The smoke suite itself runs on Linux (it
+    # drives the app through synthetic events under Xvfb); native behavior on
+    # macOS/Windows is validated manually per docs/MAC-VALIDATION.md.
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build

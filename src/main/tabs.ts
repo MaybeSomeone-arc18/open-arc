@@ -1,5 +1,7 @@
-import { BrowserWindow, WebContentsView, type Rectangle } from 'electron'
+import { BrowserWindow, Menu, WebContentsView, type Rectangle } from 'electron'
+import { buildPageContextMenu } from './contextmenu'
 import type { Space, TabItem } from '../shared/types'
+import { matchShortcut } from '../shared/shortcuts'
 
 const SIDEBAR_WIDTH = 280
 
@@ -14,11 +16,24 @@ export class TabLayer {
   private win: BrowserWindow
   private sidebarVisible = true
   private onTabUpdated: (tab: TabItem) => void
+  private onLoading: (tabId: string, loading: boolean) => void
 
-  constructor(win: BrowserWindow, onTabUpdated: (tab: TabItem) => void) {
+  constructor(
+    win: BrowserWindow,
+    onTabUpdated: (tab: TabItem) => void,
+    onLoading: (tabId: string, loading: boolean) => void = () => {},
+    private onNavigate: (tab: TabItem) => void = () => {},
+    private onOpenInNewTab: (url: string) => void = () => {},
+    private onShortcut: (action: string, arg?: string) => void = () => {}
+  ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
+    this.onLoading = onLoading
     win.on('resize', () => this.layout())
+    // macOS full-screen transitions are animated/asynchronous; relayout when
+    // they finish so tab panes track the final content size.
+    win.on('enter-full-screen', () => this.layout())
+    win.on('leave-full-screen', () => this.layout())
   }
 
   setSidebarVisible(visible: boolean): void {
@@ -27,43 +42,150 @@ export class TabLayer {
   }
 
   private attachedIds: string[] = []
+  /** Shell overlays: modals cover the page area (views hidden, since child
+   * views composite above the shell DOM); the find bar needs the page to
+   * stay visible, so views shrink to a reserved strip at the top instead. */
+  private modalOpen = false
+  private findBarOpen = false
+  private toastOpen = false
+  private hiddenIds = new Set<string>()
+  private static FIND_BAR_INSET = 48
+  private static TOAST_INSET = 64
+
+  setOverlayState(modal: boolean, findBar: boolean, toast: boolean): void {
+    this.modalOpen = modal
+    this.findBarOpen = findBar
+    this.toastOpen = toast
+    this.applyOverlayState()
+    this.layout()
+  }
+
+  private applyOverlayState(): void {
+    for (const id of this.attachedIds) {
+      const view = this.views.get(id)
+      if (!view || !this.win.contentView.children.includes(view)) continue
+      view.setVisible(!this.modalOpen)
+      if (this.modalOpen) this.hiddenIds.add(id)
+      else this.hiddenIds.delete(id)
+    }
+  }
 
   private layout(): void {
     const [w, h] = this.win.getContentSize()
     const x = this.sidebarVisible ? SIDEBAR_WIDTH : 0
     const width = Math.max(0, w - x)
+    const top = this.findBarOpen && !this.modalOpen ? TabLayer.FIND_BAR_INSET : 0
+    // Toasts render in the shell DOM at bottom-right; reserve a bottom strip
+    // so feedback is never hidden behind page content.
+    const bottom = this.toastOpen && !this.modalOpen ? TabLayer.TOAST_INSET : 0
     const n = this.attachedIds.length || 1
     this.attachedIds.forEach((id, i) => {
       const view = this.views.get(id)
       if (!view) return
       const paneWidth = Math.floor(width / n)
-      view.setBounds({ x: x + i * paneWidth, y: 0, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: h })
+      view.setBounds({ x: x + i * paneWidth, y: top, width: i === n - 1 ? width - i * paneWidth : paneWidth, height: Math.max(0, h - top - bottom) })
     })
   }
 
   private ensureView(tab: TabItem): WebContentsView {
     const existing = this.views.get(tab.id)
     if (existing) return existing
-    const view = new WebContentsView()
+    // Tab views load untrusted web content: sandboxed renderers, no preload.
+    const view = new WebContentsView({ webPreferences: { sandbox: true } })
     this.views.set(tab.id, view)
-    view.webContents.loadURL(tab.url)
+    // Attach listeners BEFORE loadURL: with in-process rendering the
+    // load events can dispatch synchronously and would be missed.
     const push = (): void => {
       tab.title = view.webContents.getTitle() || tab.url
       this.onTabUpdated({ ...tab, title: tab.title })
     }
-    view.webContents.on('page-title-updated', push)
+    view.webContents.on('page-title-updated', () => {
+      push()
+      this.onNavigate(tab) // dedupe path refreshes the recorded title
+    })
     view.webContents.on('did-navigate', () => {
       tab.url = view.webContents.getURL()
+      this.onNavigate(tab)
       push()
     })
     view.webContents.on('did-navigate-in-page', () => {
       tab.url = view.webContents.getURL()
       push()
     })
+    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      // -3 = ERR_ABORTED (a newer navigation superseded this one): not an error.
+      if (!isMainFrame || errorCode === -3) return
+      const info = JSON.stringify({ url: validatedURL, desc: errorDescription })
+      view.webContents
+        .executeJavaScript(`(() => {
+          const info = ${info}
+          document.head.innerHTML = ''
+          document.body.innerHTML = ''
+          document.body.style.cssText = 'margin:0;background:#141418;color:#e8e8ea;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;'
+          const box = document.createElement('div')
+          box.className = 'oa-error'
+          box.style.cssText = 'max-width:520px;text-align:center;padding:32px;'
+          const h = document.createElement('h1')
+          h.textContent = "Couldn't load this page"
+          h.style.cssText = 'font-size:20px;margin:0 0 12px;'
+          const u = document.createElement('div')
+          u.textContent = info.url
+          u.style.cssText = 'font-size:13px;opacity:0.7;word-break:break-all;margin-bottom:12px;'
+          const d = document.createElement('div')
+          d.textContent = info.desc
+          d.style.cssText = 'font-size:13px;opacity:0.55;'
+          const hint = document.createElement('div')
+          hint.textContent = 'Check the address or your connection, then reload (Ctrl+R).'
+          hint.style.cssText = 'font-size:12px;opacity:0.45;margin-top:16px;'
+          box.append(h, u, d, hint)
+          document.body.appendChild(box)
+        })()`)
+        .catch(() => {})
+    })
+    // App shortcuts must work while the PAGE has keyboard focus: key events
+    // inside this view never reach the shell renderer's keydown listener.
+    // Matched combos are consumed here and forwarded to the shell; everything
+    // else (ordinary typing, page-owned combos) passes through untouched.
+    // Attached only to tab views, never the shell webContents, so each key is
+    // handled by exactly one path.
+    view.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const m = matchShortcut({
+        key: input.key,
+        meta: !!input.meta,
+        ctrl: !!input.control,
+        shift: !!input.shift,
+        alt: !!input.alt
+      })
+      if (!m) return
+      event.preventDefault()
+      this.onShortcut(m.id, m.arg)
+    })
+    view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
+    view.webContents.on('did-stop-loading', () => this.onLoading(tab.id, false))
     view.webContents.on('page-favicon-updated', (_e, favicons) => {
       tab.favicon = favicons[0] ?? null
       this.onTabUpdated({ ...tab })
     })
+    view.webContents.on('context-menu', (_e, params) => {
+      // Scoped to the window (documented for frameless windows): keeps the
+      // native popup tied to this window's event loop and dismissal.
+      Menu.buildFromTemplate(buildPageContextMenu(params, view.webContents, (url) => this.onOpenInNewTab(url))).popup({ window: this.win })
+    })
+    // Popups (window.open, target=_blank) become tabs in this shell, never OS windows.
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//.test(url)) this.onOpenInNewTab(url)
+      return { action: 'deny' }
+    })
+    // Navigation resets zoom to the origin default, so a stored factor must
+    // be (re)applied after the page finishes loading.
+    if (tab.zoom && tab.zoom !== 1) {
+      view.webContents.on('did-stop-loading', () => {
+        const z = tab.zoom
+        if (z && z !== 1 && !view.webContents.isDestroyed()) view.webContents.setZoomFactor(z)
+      })
+    }
+    view.webContents.loadURL(tab.url)
     return view
   }
 
@@ -85,9 +207,26 @@ export class TabLayer {
       if (!this.win.contentView.children.includes(view)) {
         this.win.contentView.addChildView(view)
       }
+      if (this.modalOpen) { view.setVisible(false); this.hiddenIds.add(tab.id) }
       if (!this.attachedIds.includes(tab.id)) this.attachedIds.push(tab.id)
     }
     this.layout()
+  }
+
+  /** Test/debug seam: is this tab's view attached AND visible (not hidden by a modal overlay)? */
+  isTabVisible(tabId: string): boolean {
+    const view = this.views.get(tabId)
+    return !!view && this.win.contentView.children.includes(view) && !this.hiddenIds.has(tabId)
+  }
+
+  /** Test/debug seam: current bounds of a tab's view (overlay insets shift these). */
+  getTabBounds(tabId: string): Rectangle | null {
+    return this.views.get(tabId)?.getBounds() ?? null
+  }
+
+  focusTab(tabId: string): void {
+    const view = this.views.get(tabId)
+    if (view && this.win.contentView.children.includes(view)) view.webContents.focus()
   }
 
   close(tabId: string): void {
@@ -98,12 +237,90 @@ export class TabLayer {
     this.views.delete(tabId)
   }
 
-  navigate(tabId: string, command: 'back' | 'forward' | 'reload'): void {
+  findIn(tabId: string, text: string, findNext = false): Promise<Electron.FoundInPageResult | null> {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return Promise.resolve(null)
+    if (!text.trim()) {
+      wc.stopFindInPage('clearSelection')
+      return Promise.resolve(null)
+    }
+    // Clear any stale find session first; a wedged session can swallow the
+    // next request's found-in-page dispatch.
+    wc.stopFindInPage('clearSelection')
+    const attempt = (): Promise<Electron.FoundInPageResult | null> =>
+      new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000) // no-match environments must not hang
+        wc.once('found-in-page', (_e, result) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+        wc.findInPage(text, { forward: true, findNext })
+      })
+    return attempt().then((r) => r ?? attempt())
+  }
+
+  stopFind(tabId: string): void {
+    this.views.get(tabId)?.webContents.stopFindInPage('clearSelection')
+  }
+
+  private static readonly ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+  adjustZoom(tabId: string, action: 'in' | 'out' | 'reset'): number {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return 1
+    if (action === 'reset') {
+      wc.setZoomFactor(1)
+      return 1
+    }
+    const cur = wc.getZoomFactor()
+    const steps = TabLayer.ZOOM_STEPS
+    const next =
+      action === 'in'
+        ? (steps.find((z) => z > cur + 0.001) ?? steps[steps.length - 1])
+        : ([...steps].reverse().find((z) => z < cur - 0.001) ?? steps[0])
+    wc.setZoomFactor(next)
+    return next
+  }
+
+  getZoom(tabId: string): number {
+    return this.views.get(tabId)?.webContents.getZoomFactor() ?? 1
+  }
+
+  toggleMute(tabId: string): boolean {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return false
+    const next = !wc.isAudioMuted()
+    wc.setAudioMuted(next)
+    return next
+  }
+
+  toggleDevTools(tabId: string): boolean {
+    const wc = this.views.get(tabId)?.webContents
+    if (!wc) return false
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    else wc.openDevTools({ mode: 'detach' })
+    return wc.isDevToolsOpened()
+  }
+
+  webContentsFor(tabId: string): Electron.WebContents | null {
+    return this.views.get(tabId)?.webContents ?? null
+  }
+
+  isDevToolsOpen(tabId: string): boolean {
+    return this.views.get(tabId)?.webContents.isDevToolsOpened() ?? false
+  }
+
+  isMuted(tabId: string): boolean {
+    return this.views.get(tabId)?.webContents.isAudioMuted() ?? false
+  }
+
+  navigate(tabId: string, command: 'back' | 'forward' | 'reload' | 'hard-reload'): void {
     const wc = this.views.get(tabId)?.webContents
     if (!wc) return
     if (command === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
     if (command === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
     if (command === 'reload') wc.reload()
+    if (command === 'hard-reload') wc.reloadIgnoringCache()
   }
 
   navigateActiveTo(tabId: string, url: string): void {

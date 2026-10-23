@@ -5,25 +5,24 @@ import { TabRow } from './TabRow'
 interface Props {
   state: AppState
   space: Space
+  loadingTabs: Set<string>
   onOpenCommandBar: () => void
 }
 
-export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element {
+export function Sidebar({ state, space, loadingTabs, onOpenCommandBar }: Props): JSX.Element {
   const [urlDraft, setUrlDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [showAllArchived, setShowAllArchived] = useState(false)
+  const [addingSpace, setAddingSpace] = useState(false)
+  const [spaceDraft, setSpaceDraft] = useState('')
+  const [armingDelete, setArmingDelete] = useState(false)
   const [nameDraft, setNameDraft] = useState(space.name)
-
-  const activeTab = [...space.pinned, ...space.today].find((t) => t.id === space.activeTabId) ?? null
 
   const submitUrl = (): void => {
     const v = urlDraft.trim()
     if (!v) return
-    if (activeTab) {
-      // Navigate the current tab by closing over it? Arc replaces; we open fresh for PoC clarity.
-      window.openArc.openTab(v)
-    } else {
-      window.openArc.openTab(v)
-    }
+    // PoC clarity: URL bar always opens a fresh tab (Arc replaces in place).
+    window.openArc.openTab(v)
     setUrlDraft('')
   }
 
@@ -34,11 +33,15 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
 
   return (
     <aside className="sidebar">
-      <div className="drag-strip" />
+      <div className="drag-strip" onDoubleClick={() => window.openArc.windowControl('maximize')} />
       <div className="window-controls">
         <button className="wc close" title="Close" onClick={() => window.openArc.windowControl('close')} />
         <button className="wc minimize" title="Minimize" onClick={() => window.openArc.windowControl('minimize')} />
-        <button className="wc maximize" title="Maximize" onClick={() => window.openArc.windowControl('maximize')} />
+        <button
+          className="wc maximize"
+          title={/Mac/.test(navigator.userAgent) ? 'Full screen' : 'Maximize'}
+          onClick={() => window.openArc.windowControl('fullscreen')}
+        />
       </div>
 
       <div className="url-row">
@@ -68,6 +71,23 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         ) : (
           <span className="space-title">{space.name}</span>
         )}
+        {state.spaces.length > 1 && (
+          <button
+            className={`ghost-btn ${armingDelete ? 'danger' : ''}`}
+            title={armingDelete ? `Click again to delete "${space.name}" and its tabs` : 'Delete this Space'}
+            onClick={() => {
+              if (armingDelete) {
+                window.openArc.runCommand('delete-space')
+                setArmingDelete(false)
+              } else {
+                setArmingDelete(true)
+                setTimeout(() => setArmingDelete(false), 3000)
+              }
+            }}
+          >
+            ×
+          </button>
+        )}
         <button className="ghost-btn" title="Hide sidebar (Ctrl+S)" onClick={() => window.openArc.toggleSidebar()}>«</button>
       </div>
 
@@ -75,7 +95,7 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         <div className="section-label">Pinned</div>
         {space.pinned.length === 0 && <div className="empty-hint">Pin tabs to keep them here</div>}
         {space.pinned.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId} />
+          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId} loading={loadingTabs.has(tab.id)} />
         ))}
 
         <div className="section-label with-action">
@@ -87,13 +107,13 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
         </div>
         {space.today.length === 0 && <div className="empty-hint">Open tabs appear here</div>}
         {space.today.map((tab) => (
-          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId || tab.id === space.splitTabId} />
+          <TabRow key={tab.id} tab={tab} active={tab.id === space.activeTabId || tab.id === space.splitTabId} loading={loadingTabs.has(tab.id)} />
         ))}
 
         {space.archived.length > 0 && (
           <>
             <div className="section-label">Archived</div>
-            {space.archived.slice(0, 5).map((tab) => (
+            {(showAllArchived ? space.archived : space.archived.slice(0, 5)).map((tab) => (
               <div key={tab.id} className="tab-row archived" title={`${tab.url} (click to restore)`} onClick={() => window.openArc.restoreTab(tab.id)}>
                 {tab.favicon ? <img className="favicon" src={tab.favicon} alt="" /> : <span className="favicon fallback">◦</span>}
                 <span className="tab-title">{tab.title || tab.url}</span>
@@ -102,7 +122,11 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
                 </span>
               </div>
             ))}
-            {space.archived.length > 5 && <div className="empty-hint">+{space.archived.length - 5} more</div>}
+            {space.archived.length > 5 && (
+              <div className="empty-hint clickable" onClick={() => setShowAllArchived((v) => !v)}>
+                {showAllArchived ? 'Show less' : `+${space.archived.length - 5} more (click to expand)`}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -119,16 +143,28 @@ export function Sidebar({ state, space, onOpenCommandBar }: Props): JSX.Element 
             {s.icon}
           </button>
         ))}
-        <button
-          className="space-dot add"
-          title="New Space"
-          onClick={() => {
-            const name = window.prompt('Name this Space')
-            if (name) window.openArc.createSpace(name)
-          }}
-        >
-          ＋
-        </button>
+        {addingSpace ? (
+          <input
+            className="space-dot-input"
+            autoFocus
+            placeholder="Space name"
+            value={spaceDraft}
+            onChange={(e) => setSpaceDraft(e.target.value)}
+            onBlur={() => { setAddingSpace(false); setSpaceDraft('') }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && spaceDraft.trim()) {
+                window.openArc.createSpace(spaceDraft.trim())
+                setSpaceDraft('')
+                setAddingSpace(false)
+              }
+              if (e.key === 'Escape') { setAddingSpace(false); setSpaceDraft('') }
+            }}
+          />
+        ) : (
+          <button className="space-dot add" title="New Space" onClick={() => setAddingSpace(true)}>
+            ＋
+          </button>
+        )}
       </div>
     </aside>
   )

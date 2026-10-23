@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppState, CommandDef } from '../../../shared/types'
+import { fuzzyScore } from '../../../shared/fuzzy'
 
 interface Props {
   state: AppState
@@ -7,7 +8,7 @@ interface Props {
 }
 
 interface Row {
-  kind: 'open-url' | 'command' | 'tab'
+  kind: 'open-url' | 'command' | 'tab' | 'archived' | 'history' | 'closed'
   id: string
   title: string
   hint?: string
@@ -32,31 +33,65 @@ export function CommandBar({ state, onClose }: Props): JSX.Element {
     [state]
   )
 
+  const archivedTabs = useMemo(
+    () =>
+      state.spaces.flatMap((s) =>
+        s.archived.map((t) => ({ ...t, spaceName: s.name, spaceId: s.id }))
+      ),
+    [state]
+  )
+
   const rows = useMemo((): Row[] => {
     const q = query.trim().toLowerCase()
     const out: Row[] = []
     if (q.length > 0) {
       out.push({ kind: 'open-url', id: 'open-url', title: `Open "${query.trim()}"`, hint: 'URL or search' })
     }
-    for (const c of commands) {
-      if (!q || c.title.toLowerCase().includes(q)) {
-        out.push({ kind: 'command', id: c.id, title: c.title, hint: c.hint })
-      }
+    const best = (...texts: string[]): number | null => {
+      const scores = texts.map((t) => fuzzyScore(q, t)).filter((v): v is number => v !== null)
+      return scores.length ? Math.min(...scores) : null
     }
-    for (const t of allTabs) {
-      if (q && (t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))) {
-        out.push({ kind: 'tab', id: t.id, title: t.title || t.url, hint: t.spaceName })
-      }
+    const commandRows = commands
+      .map((c) => ({ row: { kind: 'command', id: c.id, title: c.title, hint: c.hint } as Row, score: q ? best(c.title) : 0 }))
+      .filter((e) => e.score !== null)
+      .sort((a, b) => a.score! - b.score!)
+    out.push(...commandRows.map((e) => e.row))
+    if (q) {
+      const tabRows = allTabs
+        .map((t) => ({ row: { kind: 'tab', id: t.id, title: t.title || t.url, hint: t.spaceName } as Row, score: best(t.title, t.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+      out.push(...tabRows.map((e) => e.row))
+      const archRows = archivedTabs
+        .map((t) => ({ row: { kind: 'archived', id: t.id, title: t.title || t.url, hint: `${t.spaceName} · archived` } as Row, score: best(t.title, t.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+      out.push(...archRows.map((e) => e.row))
+      const closedRows = state.recentlyClosed
+        .map((t) => ({ row: { kind: 'closed', id: t.url, title: t.title || t.url, hint: 'recently closed' } as Row, score: best(t.title, t.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+        .slice(0, 4)
+      out.push(...closedRows.map((e) => e.row))
+      const histRows = state.history
+        .map((h) => ({ row: { kind: 'history', id: h.url, title: h.title || h.url, hint: 'history' } as Row, score: best(h.title, h.url) }))
+        .filter((e) => e.score !== null)
+        .sort((a, b) => a.score! - b.score!)
+        .slice(0, 4)
+      out.push(...histRows.map((e) => e.row))
     }
     return out.slice(0, 12)
-  }, [query, commands, allTabs])
+  }, [query, commands, allTabs, archivedTabs, state.history, state.recentlyClosed])
 
   useEffect(() => setSelected(0), [query])
 
   const run = (row: Row): void => {
     if (row.kind === 'open-url') window.openArc.openTab(query.trim())
-    if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' ? query.trim() : undefined)
+    if (row.kind === 'command') window.openArc.runCommand(row.id, row.id === 'new-space' || row.id === 'move-to-space' ? query.trim() : undefined)
     if (row.kind === 'tab') window.openArc.switchTab(row.id)
+    if (row.kind === 'archived') window.openArc.restoreTab(row.id)
+    if (row.kind === 'history') window.openArc.openTab(row.id)
+    if (row.kind === 'closed') window.openArc.openTab(row.id)
     onClose()
   }
 
