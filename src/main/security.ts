@@ -68,6 +68,17 @@ export const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | 
 /** Palette commands plus renderer-only ids that runCommand handles (Ctrl+1..9). */
 const COMMAND_IDS = [...COMMANDS.map((c) => c.id), 'goto-tab']
 export const commandId = (v: unknown): string | null => oneOf(v, COMMAND_IDS)
+/** Validated profileId for Space partition isolation: alphanumeric, hyphen, underscore, max 64 chars. */
+export const profileId = (v: unknown): string | null => {
+  const s = str(v, 64)
+  return s && /^[\w-]+$/.test(s) ? s : null
+}
+/** Returns Electron partition string for a profile ID. Empty or 'default' maps to default session (''). */
+export const partitionForProfile = (p?: string | null): string => {
+  if (!p || p === 'default') return ''
+  const valid = profileId(p)
+  return valid ? `persist:space-${valid}` : ''
+}
 /** Only http(s) or a bare query/host the app already normalizes; never file:/javascript:/data:. */
 export function userUrl(v: unknown): string | null {
   const s = str(v)

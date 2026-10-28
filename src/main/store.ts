@@ -60,6 +60,9 @@ function validateStateShape(p: unknown): AppState {
         space.splitRatio = Math.max(0.1, Math.min(0.9, Math.round(space.splitRatio * 1000) / 1000))
       }
     }
+    if (space.profileId !== undefined && typeof space.profileId !== 'string') {
+      throw new Error('space profileId must be a string')
+    }
   }
   if (typeof s.activeSpaceId !== 'string') throw new Error('activeSpaceId must be a string')
   if (s.sidebarVisible !== undefined && typeof s.sidebarVisible !== 'boolean') throw new Error('sidebarVisible must be a boolean')
