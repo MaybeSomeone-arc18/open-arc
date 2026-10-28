@@ -10,7 +10,7 @@ import { StateStore } from './store'
 import { TabLayer } from './tabs'
 import { matchShortcut, type ShortcutDescriptor } from '../shared/shortcuts'
 import { CrashGate, isCrashReason } from './recovery'
-import { isTrustedSender, installPermissionPolicy, str, id as idv, oneOf, commandId, userUrl, type TrustConfig } from './security'
+import { isTrustedSender, installPermissionPolicy, str, id as idv, oneOf, commandId, userUrl, profileId, partitionForProfile, type TrustConfig } from './security'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -45,7 +45,7 @@ function makeTab(url: string, pinned: boolean): TabItem {
   return { id: randomUUID(), url: normalizeUrl(url), title: url, favicon: null, pinned, lastActiveAt: Date.now() }
 }
 
-function makeSpace(name: string, colorIx: number): Space {
+function makeSpace(name: string, colorIx: number, isDefault = false): Space {
   return {
     id: randomUUID(),
     name,
@@ -55,12 +55,13 @@ function makeSpace(name: string, colorIx: number): Space {
     today: [],
     archived: [],
     activeTabId: null,
-    splitTabId: null
+    splitTabId: null,
+    profileId: isDefault ? undefined : randomUUID()
   }
 }
 
 function defaultState(): AppState {
-  const space = makeSpace('Personal', 0)
+  const space = makeSpace('Personal', 0, true)
   return {
     spaces: [space],
     activeSpaceId: space.id,
@@ -83,9 +84,15 @@ function migrate(state: AppState): AppState {
   for (const f of state.favorites) {
     f.lastActiveAt = f.lastActiveAt ?? Date.now()
   }
-  for (const s of state.spaces) {
+  for (let i = 0; i < state.spaces.length; i++) {
+    const s = state.spaces[i]
     s.archived = s.archived ?? []
     s.splitTabId = s.splitTabId ?? null
+    // Backward compatibility: existing space without profileId at index 0 stays on default session (undefined).
+    // Subsequent existing spaces without profileId receive a stable partition based on their ID.
+    if (s.profileId === undefined && i > 0) {
+      s.profileId = s.id
+    }
     for (const t of [...s.pinned, ...s.today, ...s.archived]) {
       t.lastActiveAt = t.lastActiveAt ?? Date.now()
     }
@@ -158,45 +165,38 @@ class OpenArcApp {
     this.tabs.show(this.activeSpace(), this.state.favorites ?? [])
   }
 
-  start(): void {
-    // Frameless browser shell: drop the default application menu so its
-    // accelerators (Ctrl+R = reload the SHELL, devtools, etc.) never fire.
-    // All shortcuts live in the renderer and act on the active tab instead.
-    Menu.setApplicationMenu(null)
-    this.createShellWindow()
-    // Downloads: save into the system Downloads folder, toast on completion.
-    this.downloadsDone = []
-    const inFlightDownloads = new Set<string>()
-    session.defaultSession.on('will-download', (_e, item, wc) => {
-      // Never overwrite an existing (or in-flight) download with the same
-      // name: forcing a save path bypasses Chromium's own uniquification.
+  private configuredSessions = new Set<Electron.Session>()
+  private inFlightDownloads = new Set<string>()
+
+  /** Configures an Electron Session with fail-closed permission policies and safe download routing. Idempotent. */
+  private configureSession(ses: Electron.Session): void {
+    if (this.configuredSessions.has(ses)) return
+    this.configuredSessions.add(ses)
+
+    installPermissionPolicy(ses)
+
+    ses.on('will-download', (_e, item, wc) => {
       const dlDir = app.getPath('downloads')
       const original = item.getFilename()
       const dlExt = extname(original)
       const dlBase = original.slice(0, original.length - dlExt.length)
       let savePath = join(dlDir, original)
       let collision = 1
-      while (fs.existsSync(savePath) || inFlightDownloads.has(savePath)) {
+      while (fs.existsSync(savePath) || this.inFlightDownloads.has(savePath)) {
         savePath = join(dlDir, `${dlBase} (${collision})${dlExt}`)
         collision++
       }
-      inFlightDownloads.add(savePath)
+      this.inFlightDownloads.add(savePath)
       item.setSavePath(savePath)
       item.once('done', (_ev, st) => {
-        inFlightDownloads.delete(savePath)
-        // Verify the file really landed before telling the user it did.
+        this.inFlightDownloads.delete(savePath)
         let size: number | undefined
         try {
           if (st === 'completed' && fs.existsSync(savePath)) size = fs.statSync(savePath).size
         } catch { size = undefined }
         const info = { filename: basename(savePath), path: savePath, state: st, size }
         this.downloadsDone.push(info)
-        if (!this.win.isDestroyed()) this.win.webContents.send('download:done', info)
-        // A tab navigated directly at a binary is left blank once the
-        // navigation turns into a download. Give it an honest, recoverable
-        // status page instead of pretending the binary was a web page.
-        // loadURL (not executeJavaScript): a navigation that became a
-        // download can leave renderer calls hanging.
+        if (this.win && !this.win.isDestroyed()) this.win.webContents.send('download:done', info)
         if (wc && !wc.isDestroyed() && (wc.getURL() === '' || wc.getURL() === 'about:blank')) {
           const esc = (v: string): string => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           const title = st === 'completed' ? 'Download complete' : `Download ${st}`
@@ -214,12 +214,18 @@ class OpenArcApp {
         }
       })
     })
+  }
 
-
-    // Default-deny every web permission request (camera, mic, notifications,
-    // geolocation, ...). Electron grants them unless a handler says no; a
-    // browser shell must decide deliberately. No prompts exist yet, so deny.
+  start(): void {
+    // Frameless browser shell: drop the default application menu so its
+    // accelerators (Ctrl+R = reload the SHELL, devtools, etc.) never fire.
+    // All shortcuts live in the renderer and act on the active tab instead.
+    Menu.setApplicationMenu(null)
+    this.createShellWindow()
+    // Downloads & permissions: configure session with fail-closed permissions and download handling
+    this.downloadsDone = []
     installPermissionPolicy(session.defaultSession)
+    this.configureSession(session.defaultSession)
 
     // A failed debounced save must become an explicit signal, not silence.
     this.store.onSaveError = (saveErr) => {
@@ -294,6 +300,10 @@ class OpenArcApp {
             this.commit()
           }
         }
+      },
+      (part) => {
+        const ses = part ? session.fromPartition(part) : session.defaultSession
+        this.configureSession(ses)
       }
     )
     this.tabs.setSidebarVisible(this.state.sidebarVisible)
@@ -2073,7 +2083,35 @@ class OpenArcApp {
       'command: move back to Personal',
       !!this.state.spaces.find((sp) => sp.name === 'Personal')?.today.some((t) => t.id === wikiTab.id)
     )
+
+    // Milestone 3: Session & Cookie Isolation Verification
+    // Tab in Personal space (default session) sets a cookie
+    const personalWc = this.tabs.webContentsFor(exampleTab.id)!
+    await personalWc.executeJavaScript("document.cookie = 'oa_test=personal_val; path=/'")
+
+    // Switch to Smoke space and create a tab (partition: persist:space-<id>)
+    const smokeSpObj = this.state.spaces.find((sp) => sp.name === 'Smoke')!
+    this.state.activeSpaceId = smokeSpObj.id
+    this.openTab('https://example.com/')
+    const smokeTab = this.activeTab()!
+    await pollUntil(() => (this.tabs.currentUrl(smokeTab.id) ?? '').includes('example.com'), 5000)
+    const smokeWc = this.tabs.webContentsFor(smokeTab.id)!
+    const initialSmokeCookie = await smokeWc.executeJavaScript('document.cookie')
+    await smokeWc.executeJavaScript("document.cookie = 'oa_test=smoke_val; path=/'")
+    const smokeCookie = await smokeWc.executeJavaScript('document.cookie')
+
+    // Check isolation: Smoke did not see Personal's cookie, and Personal retained its own
     this.switchTab(exampleTab.id)
+    const personalCookieAfter = await personalWc.executeJavaScript('document.cookie')
+    check(
+      'spaces: cookie and storage isolation between spaces',
+      !initialSmokeCookie.includes('personal_val') &&
+        smokeCookie.includes('smoke_val') &&
+        personalCookieAfter.includes('personal_val') &&
+        !personalCookieAfter.includes('smoke_val'),
+      `personal="${personalCookieAfter}" smoke="${smokeCookie}"`
+    )
+    this.closeTab(smokeTab.id)
 
     // Pin, unpin, re-pin (verify phase expects the example tab pinned)
     this.setPinned(exampleTab.id, true)

@@ -4,6 +4,7 @@ import type { Space, TabItem } from '../shared/types'
 import { matchShortcut } from '../shared/shortcuts'
 import { computeSplitPaneBounds, DIVIDER_WIDTH, MIN_PANE_WIDTH, type SplitPaneBounds } from '../shared/splitGeometry'
 import { CrashGate, isCrashReason, crashedPageUrl } from './recovery'
+import { partitionForProfile } from './security'
 
 const SIDEBAR_WIDTH = 280
 
@@ -15,6 +16,7 @@ const SIDEBAR_WIDTH = 280
  */
 export class TabLayer {
   private views = new Map<string, WebContentsView>()
+  private tabPartitions = new Map<string, string>()
   private crashGate = new CrashGate()
   /** tabId -> real URL of a tab that is showing the crashed page. */
   private crashedUrl = new Map<string, string>()
@@ -32,7 +34,8 @@ export class TabLayer {
     private onNavigate: (tab: TabItem) => void = () => {},
     private onOpenInNewTab: (url: string) => void = () => {},
     private onShortcut: (action: string, arg?: string) => void = () => {},
-    private onTabFocused: (tabId: string) => void = () => {}
+    private onTabFocused: (tabId: string) => void = () => {},
+    private onEnsureSession: (partition: string) => void = () => {}
   ) {
     this.win = win
     this.onTabUpdated = onTabUpdated
@@ -218,12 +221,28 @@ export class TabLayer {
     return computeSplitPaneBounds(availWidth, ratio)
   }
 
-  private ensureView(tab: TabItem): WebContentsView {
+  private ensureView(tab: TabItem, partition: string): WebContentsView {
     const existing = this.views.get(tab.id)
-    if (existing) return existing
-    // Tab views load untrusted web content: sandboxed renderers, no preload.
-    const view = new WebContentsView({ webPreferences: { sandbox: true } })
+    const existingPartition = this.tabPartitions.get(tab.id) ?? ''
+    if (existing && existingPartition === partition) return existing
+    if (existing) {
+      if (this.win.contentView.children.includes(existing)) {
+        this.win.contentView.removeChildView(existing)
+      }
+      existing.webContents.close()
+      this.views.delete(tab.id)
+      this.tabPartitions.delete(tab.id)
+    }
+
+    this.onEnsureSession(partition)
+
+    const webPreferences: Electron.WebPreferences = { sandbox: true }
+    if (partition) {
+      webPreferences.partition = partition
+    }
+    const view = new WebContentsView({ webPreferences })
     this.views.set(tab.id, view)
+    this.tabPartitions.set(tab.id, partition)
     // Attach listeners BEFORE loadURL: with in-process rendering the
     // load events can dispatch synchronously and would be missed.
     view.webContents.on('did-start-loading', () => this.onLoading(tab.id, true))
@@ -338,6 +357,7 @@ export class TabLayer {
   /** Attach views for the active tab (and split partner), detach everything else. */
   show(space: Space, extraTabs: TabItem[] = []): void {
     this.stopSplitDrag()
+    const spacePartition = partitionForProfile(space.profileId)
     const all = [...space.pinned, ...space.today, ...extraTabs]
     const active = all.find((t) => t.id === space.activeTabId)
     const split = space.splitTabId ? all.find((t) => t.id === space.splitTabId) : undefined
@@ -350,7 +370,10 @@ export class TabLayer {
     }
     this.attachedIds = []
     for (const tab of wanted) {
-      const view = this.ensureView(tab)
+      // Global favorites use the default session ('') for cross-space stability unless in a space list.
+      const isFav = extraTabs.some((f) => f.id === tab.id) && !space.pinned.some((t) => t.id === tab.id) && !space.today.some((t) => t.id === tab.id)
+      const tabPartition = isFav ? '' : spacePartition
+      const view = this.ensureView(tab, tabPartition)
       if (!this.win.contentView.children.includes(view)) {
         this.win.contentView.addChildView(view)
       }
@@ -387,6 +410,7 @@ export class TabLayer {
     if (this.win.contentView.children.includes(view)) this.win.contentView.removeChildView(view)
     view.webContents.close()
     this.views.delete(tabId)
+    this.tabPartitions.delete(tabId)
   }
 
   findIn(tabId: string, text: string, findNext = false): Promise<Electron.FoundInPageResult | null> {

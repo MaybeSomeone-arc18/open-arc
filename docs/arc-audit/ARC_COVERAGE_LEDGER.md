@@ -26,7 +26,7 @@ Evidence Ratings: **E1 (Runtime Observed)**, **E2 (Static Artifact)**, **E3 (Str
 | | Horizontal Space Paging Dock | **E1** | RUNTIME VERIFIED | `AX_SPACES_001` (`SidebarDockItem-*`) | Bottom dock contains dock icons for all configured Spaces. |
 | **E. Spaces System** | Multi-space concurrent residency | **E1** | RUNTIME VERIFIED | `AX_SPACES_001` | 3 distinct `sidebarAllTabList` trees active in memory. |
 | | Space switching | **E2 / E3** | STATIC EVIDENCE FOUND | `SidebarPagingContainerCollectionViewLayout` | Paged horizontal scroll container. |
-| **F. Profiles** | Partitioned storage context | **E2** | STATIC EVIDENCE FOUND | `ArcBrowserContext`, `ADKModels.Profile` | Storage, cookies, and extensions partitioned by context. |
+| **F. Profiles** | Partitioned storage context | **E1 / E2** | RUNTIME VERIFIED | `ArcBrowserContext`, `ADKModels.Profile` | Storage, cookies, and downloads partitioned per Space session. |
 | **G. Split View** | Dual-pane horizontal layout | **E1** | RUNTIME VERIFIED | `AX_SPLIT_001` | Main viewport splits at `x=232.0`. |
 | | Vertical split serialization keys | **E2** | STATIC EVIDENCE FOUND | `ConvertToVerticalSplitViewCodingKeys` | Proves vertical layout is supported by data model. |
 | | Directional pane addition keys | **E2** | STATIC EVIDENCE FOUND | `AddLeftSplitCodingKeys`, `AddRightSplitCodingKeys`, etc. | Model supports 4-way pane additions. |

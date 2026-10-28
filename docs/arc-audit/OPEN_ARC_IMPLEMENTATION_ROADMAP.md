@@ -38,6 +38,16 @@ A phased, dependency-ordered engineering plan for bridging verified Arc function
 ## Milestone 3: Profile Partitions for Spaces
 
 ### Objectives
-1. Add `profileId: string` to `Space` model in `src/shared/types.ts`.
-2. In `src/main/tabs.ts`, instantiate `WebContentsView` with `{ webPreferences: { partition: space.profileId } }`.
-3. Provide cookie and login isolation between distinct Spaces (e.g. Work vs. Personal).
+1. Add `profileId?: string` to `Space` model in `src/shared/types.ts`.
+2. In `src/main/tabs.ts`, instantiate `WebContentsView` with `{ webPreferences: { partition: partitionForProfile(space.profileId) } }`.
+3. Provide cookie, storage, and login isolation between distinct Spaces (e.g. Work vs. Personal).
+4. Maintain default session compatibility for legacy state (Space index 0 / default session) and global favorites.
+5. Dynamically attach fail-closed permission policies and safe download routing to newly configured session partitions.
+6. Handle dynamic session reassignment when moving tabs between spaces without leaking cross-space session states.
+
+### Acceptance Criteria
+- [x] Newly created spaces receive isolated persistent partitions (`persist:space-<profileId>`).
+- [x] Legacy default space and favorites use default session for backward compatibility.
+- [x] Cookie and storage data between distinct Space partitions do not cross-pollinate.
+- [x] Moving a tab between spaces tears down the old view and reconstructs it with the target space's partition.
+- [x] Every session partition is secured with fail-closed permissions and safe collision-free downloads.

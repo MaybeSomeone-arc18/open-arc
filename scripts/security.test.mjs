@@ -62,6 +62,10 @@ t('commandId: renderer-only goto-tab allowed', S.commandId('goto-tab') === 'goto
 t('userUrl: http/https/search/host allowed', ['https://a.com', 'http://a.com', 'wikipedia', 'a.com/x', 'localhost:3000'].every((u) => S.userUrl(u) === u))
 t('userUrl: dangerous schemes rejected', ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,x', 'chrome://gpu', 'vbscript:x'].every((u) => S.userUrl(u) === null))
 t('userUrl: non-string rejected', S.userUrl({}) === null && S.userUrl(null) === null)
+t('profileId: valid alphanumeric and dash', S.profileId('work-123_a') === 'work-123_a' && S.profileId('personal') === 'personal')
+t('profileId: rejects invalid/dangerous chars/length', S.profileId('../evil') === null && S.profileId('a b') === null && S.profileId('x'.repeat(100)) === null && S.profileId({}) === null)
+t('partitionForProfile: empty/default maps to default session', S.partitionForProfile('') === '' && S.partitionForProfile(null) === '' && S.partitionForProfile('default') === '')
+t('partitionForProfile: custom profile maps to persist:space-id', S.partitionForProfile('work') === 'persist:space-work')
 
 // permissions
 const calls = { req: [], chk: [], dev: 0 }

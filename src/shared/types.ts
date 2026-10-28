@@ -33,6 +33,8 @@ export interface Space {
   focusedTabId?: string | null
   /** Width fraction of the left (active) pane when splitTabId is set. In [0.1, 0.9], defaults to 0.5. */
   splitRatio?: number
+  /** Profile/partition identifier for session and cookie isolation. Empty or undefined means default session. */
+  profileId?: string
 }
 
 export interface ClosedTab {
